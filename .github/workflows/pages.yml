@@ -1,9 +1,6 @@
-name: Deploy GitHub Pages Preview
+name: Deploy GitHub Pages
 
 on:
-  push:
-    branches:
-      - feature/v1-personalized-onboarding-themes
   workflow_dispatch:
 
 permissions:
@@ -12,7 +9,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: what-to-eat-pages-preview
+  group: pages
   cancel-in-progress: true
 
 jobs:
@@ -24,11 +21,10 @@ jobs:
         with:
           node-version: 22
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - run: npm install
       - run: npm run build
         env:
+          STATIC_EXPORT: "true"
           NEXT_PUBLIC_BASE_PATH: /what-to-eat
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -41,6 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - name: Deploy preview to GitHub Pages
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
