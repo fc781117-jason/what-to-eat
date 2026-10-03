@@ -4,10 +4,14 @@ const basePath = isGithubPages ? "/what-to-eat" : "";
 
 const nextConfig = {
   reactStrictMode: true,
-  output: "export",
-  basePath,
-  assetPrefix: basePath || undefined,
-  trailingSlash: true,
+  ...(isGithubPages
+    ? {
+        output: "export",
+        basePath,
+        assetPrefix: basePath,
+        trailingSlash: true,
+      }
+    : {}),
 };
 
 export default nextConfig;
