@@ -1,14 +1,14 @@
 /** @type {import('next').NextConfig} */
-const isGithubPages = process.env.GITHUB_ACTIONS === "true";
-const basePath = isGithubPages ? "/what-to-eat" : "";
+const requestedBasePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+const shouldExport = process.env.STATIC_EXPORT === "true" || process.env.GITHUB_ACTIONS === "true";
 
 const nextConfig = {
   reactStrictMode: true,
-  ...(isGithubPages
+  ...(shouldExport
     ? {
         output: "export",
-        basePath,
-        assetPrefix: basePath,
+        basePath: requestedBasePath,
+        assetPrefix: requestedBasePath,
         trailingSlash: true,
       }
     : {}),
