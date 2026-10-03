@@ -1311,6 +1311,12 @@ select:focus-visible {
   line-height: 1.35;
 }
 
+.restaurantInfo .matchHint {
+  color: var(--primary);
+  font-weight: 800;
+  font-size: 11px;
+}
+
 .good {
   color: #279b67 !important;
 }
