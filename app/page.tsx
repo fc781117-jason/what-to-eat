@@ -18,6 +18,7 @@ import {
   THEME_OPTIONS,
   ViewId,
 } from "../lib/product";
+import { rankRestaurants, recommendationHint, weightedPick } from "../lib/recommendation";
 
 const PROFILE_KEY = "wte_profile";
 const FAVORITES_KEY = "wte_favorites";
@@ -104,15 +105,10 @@ export default function HomePage() {
     [onlyOpen, profile.walk, budgetMax, minRating],
   );
 
-  const recommended = useMemo(() => {
-    return [...eligible]
-      .sort((a, b) => {
-        const aMatch = profile.favoriteCuisines.includes(a.cuisine) ? 1 : 0;
-        const bMatch = profile.favoriteCuisines.includes(b.cuisine) ? 1 : 0;
-        return bMatch - aMatch || b.rating - a.rating;
-      })
-      .slice(0, 3);
-  }, [eligible, profile.favoriteCuisines]);
+  const recommended = useMemo(
+    () => rankRestaurants(eligible, profile).slice(0, 3),
+    [eligible, profile],
+  );
 
   const categoryResults = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -190,7 +186,7 @@ export default function HomePage() {
       ticks += 1;
       if (ticks > 15) {
         window.clearInterval(timer);
-        const winner = eligible[Math.floor(Math.random() * eligible.length)];
+        const winner = weightedPick(eligible, profile) ?? eligible[0];
         setSlotCuisine(winner.cuisine);
         setSlotRestaurant(winner.name);
         window.setTimeout(() => {
@@ -320,6 +316,7 @@ export default function HomePage() {
                       setSelected(restaurant);
                       setView("detail");
                     }}
+                    hint={recommendationHint(restaurant, profile)}
                   />
                 ))}
               </div>
@@ -1138,6 +1135,7 @@ function RestaurantCard({
   onFavorite,
   onCompare,
   onOpen,
+  hint,
 }: {
   restaurant: Restaurant;
   favorite: boolean;
@@ -1145,6 +1143,7 @@ function RestaurantCard({
   onFavorite: () => void;
   onCompare: () => void;
   onOpen: () => void;
+  hint?: string;
 }) {
   return (
     <article className="restaurantCard">
@@ -1164,6 +1163,7 @@ function RestaurantCard({
         <p>
           🚶 {restaurant.walk} 分 · 每人 {moneyText(restaurant.priceMin, restaurant.priceMax)}
         </p>
+        {hint && <p className="matchHint">✨ {hint}</p>}
       </button>
       <div className="cardActions">
         <button onClick={onFavorite} aria-label={favorite ? "取消收藏" : "收藏"}>
