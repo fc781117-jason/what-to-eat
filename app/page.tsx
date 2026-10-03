@@ -190,18 +190,29 @@ export default function HomePage() {
           <div className="brandMark">🍚</div>
           <p className="eyebrow">第一次見面</p>
           <h1>先把它變成你的美食 App</h1>
-          <p className="muted">不用一次設定很多，之後都能再改。你的偏好先存在這台裝置；Google 雲端同步會在下一階段開啟。</p>
+          <p className="muted">先選你喜歡的介面，再設定最基本的找店條件。之後都能在設定裡修改；若選「自動切換」，只會依時段切換完整主題，不會把不同風格混在一起。</p>
 
           <label className="fieldLabel">怎麼稱呼你？</label>
           <input className="textInput" placeholder="可以留白" value={profile.name} onChange={e=>setProfile({...profile,name:e.target.value})}/>
 
-          <label className="fieldLabel">介面風格</label>
+          <div className="fieldHeading">
+            <label className="fieldLabel">介面風格</label>
+            <span>可隨時更換</span>
+          </div>
           <div className="themeGrid">
             {THEME_OPTIONS.map(t=>(
               <button key={t.id} className={"themeChoice "+(profile.theme===t.id?"selected":"")} onClick={()=>setProfile({...profile,theme:t.id})}>
-                <div className="themeThumb">{t.colors.map(c=><span key={c} style={{background:c}} />)}</div>
-                <strong>{t.name}</strong>
-                <small>{t.desc}</small>
+                <div className={"themeMini "+t.id} aria-hidden="true">
+                  <div className="miniHeader"><span></span><span></span><span></span></div>
+                  <div className="miniHero"></div>
+                  <div className="miniCards"><span></span><span></span><span></span><span></span></div>
+                  <div className="miniBar"></div>
+                </div>
+                <div className="themeChoiceText">
+                  <strong>{t.name}</strong>
+                  <small>{t.desc}</small>
+                  <em>{profile.theme===t.id ? "已選擇" : "點一下預覽並套用"}</em>
+                </div>
               </button>
             ))}
           </div>
