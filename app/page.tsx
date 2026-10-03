@@ -381,8 +381,16 @@ export default function HomePage() {
             <div className="themeGrid">
               {THEME_OPTIONS.map(t=>(
                 <button key={t.id} className={"themeChoice "+(profile.theme===t.id?"selected":"")} onClick={()=>setProfile({...profile,theme:t.id})}>
-                  <div className="themeThumb">{t.colors.map(c=><span key={c} style={{background:c}} />)}</div>
-                  <strong>{t.name}</strong><small>{t.desc}</small>
+                  <div className={"themeMini "+t.id} aria-hidden="true">
+                    <div className="miniHeader"><span></span><span></span><span></span></div>
+                    <div className="miniHero"></div>
+                    <div className="miniCards"><span></span><span></span><span></span><span></span></div>
+                    <div className="miniBar"></div>
+                  </div>
+                  <div className="themeChoiceText">
+                    <strong>{t.name}</strong><small>{t.desc}</small>
+                    <em>{profile.theme===t.id ? "已選擇" : "點一下套用"}</em>
+                  </div>
                 </button>
               ))}
             </div>
