@@ -100,7 +100,7 @@ export default function HomePage() {
     }
     if (fav) try { setFavorites(JSON.parse(fav)); } catch {}
     if (cmp) try { setCompare(JSON.parse(cmp)); } catch {}
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(()=>{});
+    if ("serviceWorker" in navigator) { const base = process.env.NEXT_PUBLIC_BASE_PATH || ""; navigator.serviceWorker.register(`${base}/sw.js`).catch(()=>{}); }
     setHydrated(true);
   }, []);
 
