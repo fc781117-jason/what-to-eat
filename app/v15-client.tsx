@@ -127,6 +127,24 @@ export default function V15Client() {
     localStorage.setItem(DECISION_SESSIONS_KEY, JSON.stringify(decisionSessions.slice(0, 500)));
   }, [profile, favorites, compare, history, decisionSessions, hydrated]);
 
+  useEffect(() => {
+    function onVisibilityChange() {
+      setActiveDecision((current) => {
+        if (!current) return current;
+        if (document.visibilityState === "hidden" && current.status === "active") {
+          return pauseDecisionSession(current);
+        }
+        if (document.visibilityState === "visible" && current.status === "paused") {
+          return resumeDecisionSession(current);
+        }
+        return current;
+      });
+    }
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
   const budgetMax = priceBandMax(profile.priceBand);
 
   const eligible = useMemo(
@@ -316,6 +334,15 @@ export default function V15Client() {
     );
   }
 
+  function goHome() {
+    if (activeDecision && (activeDecision.status === "active" || activeDecision.status === "paused")) {
+      const abandoned = abandonDecisionSession(activeDecision);
+      setDecisionSessions((current) => [abandoned, ...current].slice(0, 500));
+      setActiveDecision(null);
+    }
+    setView("home");
+  }
+
   function resetProfile() {
     setProfile(DEFAULT_PROFILE);
     setFavorites([]);
@@ -347,7 +374,7 @@ export default function V15Client() {
   const Header = ({ title }: { title?: string }) => (
     <header className="topbar">
       {view !== "home" ? (
-        <button className="iconBtn" onClick={() => setView("home")} aria-label="回首頁">
+        <button className="iconBtn" onClick={goHome} aria-label="回首頁">
           ←
         </button>
       ) : (
@@ -536,6 +563,13 @@ export default function V15Client() {
                   <button onClick={() => recordDecision(rouletteWinner, "roulette")}>就吃這家</button>
                   <button
                     onClick={() => {
+                      if (activeDecision) {
+                        setActiveDecision(
+                          recordDecisionEvent(activeDecision, "skip_once", {
+                            candidateId: rouletteWinner.id,
+                          }),
+                        );
+                      }
                       setSkipIds((current) => [...new Set([...current, rouletteWinner.id])]);
                       setRouletteWinner(null);
                     }}
@@ -780,10 +814,10 @@ export default function V15Client() {
             </section>
 
             <section className="statsGrid">
-              <StatCard value={String(stats.decisions)} label="完成選餐" />
-              <StatCard value={String(stats.candidates)} label="累計候選家次" />
-              <StatCard value={formatDecisionDuration(stats.averageDecisionSeconds)} label="平均決定時間" />
-              <StatCard value={String(stats.slowDecisions)} label="超過 10 分鐘" />
+              <StatCard value={String(decisionStats.completed)} label="完成選餐" />
+              <StatCard value={formatDecisionDuration(decisionStats.averageActiveSeconds)} label="平均主動決策時間" />
+              <StatCard value={formatDecisionDuration(decisionStats.medianActiveSeconds)} label="中位數決策時間" />
+              <StatCard value={String(decisionStats.slowDecisions)} label="超過 10 分鐘" />
             </section>
 
             <section className="insightCard">
@@ -801,11 +835,17 @@ export default function V15Client() {
               {stats.fastestDecisionSeconds && (
                 <p>最快一次只花 {formatDecisionDuration(stats.fastestDecisionSeconds)}。</p>
               )}
-              {stats.slowDecisions > 0 && (
+              {decisionStats.slowDecisions > 0 && (
                 <p className="funNote">
-                  本期有 {stats.slowDecisions} 次考慮超過 10 分鐘——今天可能真的有一點選擇障礙。
+                  本期有 {decisionStats.slowDecisions} 次主動考慮超過 10 分鐘——今天可能真的有一點選擇障礙。
                 </p>
               )}
+              <p className="micro">
+                第一次推薦就接受：{decisionStats.firstChoiceAcceptanceRate}% · 未完成率：{decisionStats.abandonmentRate}%
+              </p>
+              <button className="secondaryBtn" onClick={() => setView("history")}>
+                查看詳細紀錄
+              </button>
             </section>
 
             <section className="chartCard">
@@ -1104,18 +1144,15 @@ export default function V15Client() {
           </>
         )}
 
-        <nav className="bottomNav five">
-          <button className={view === "home" ? "active" : ""} onClick={() => setView("home")}>
+        <nav className="bottomNav four">
+          <button className={view === "home" ? "active" : ""} onClick={goHome}>
             <span className="navIcon">⌂</span><span>首頁</span>
           </button>
           <button className={view === "favorites" ? "active" : ""} onClick={() => setView("favorites")}>
             <span className="navIcon">♡</span><span>收藏</span>
           </button>
-          <button className={view === "stats" ? "active" : ""} onClick={() => setView("stats")}>
+          <button className={view === "stats" || view === "history" ? "active" : ""} onClick={() => setView("stats")}>
             <span className="navIcon">▥</span><span>統計</span>
-          </button>
-          <button className={view === "history" ? "active" : ""} onClick={() => setView("history")}>
-            <span className="navIcon">◷</span><span>紀錄</span>
           </button>
           <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>
             <span className="navIcon">◎</span><span>我的</span>
