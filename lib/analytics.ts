@@ -78,3 +78,65 @@ export function formatDecisionDuration(seconds: number) {
   const remain = seconds % 60;
   return remain ? `${minutes} 分 ${remain} 秒` : `${minutes} 分鐘`;
 }
+
+
+import type { DecisionSession } from "./decision-session";
+
+export type DecisionBehaviorStats = {
+  completed: number;
+  abandoned: number;
+  averageActiveSeconds: number;
+  medianActiveSeconds: number;
+  fastestActiveSeconds: number | null;
+  slowDecisions: number;
+  abandonmentRate: number;
+  firstChoiceAcceptanceRate: number;
+  averageRerolls: number;
+};
+
+function median(values: number[]) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[mid]
+    : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+export function buildDecisionBehaviorStats(
+  sessions: DecisionSession[],
+): DecisionBehaviorStats {
+  const completed = sessions.filter((session) => session.status === "completed");
+  const abandoned = sessions.filter((session) => session.status === "abandoned");
+  const durations = completed
+    .map((session) => Math.round(session.activeMs / 1000))
+    .filter((seconds) => seconds > 0);
+
+  const totalSessions = completed.length + abandoned.length;
+  const firstChoiceAccepted = completed.filter((session) => session.rerolls === 0).length;
+
+  return {
+    completed: completed.length,
+    abandoned: abandoned.length,
+    averageActiveSeconds: durations.length
+      ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length)
+      : 0,
+    medianActiveSeconds: median(durations),
+    fastestActiveSeconds: durations.length ? Math.min(...durations) : null,
+    slowDecisions: durations.filter((seconds) => seconds >= 600).length,
+    abandonmentRate: totalSessions
+      ? Math.round((abandoned.length / totalSessions) * 100)
+      : 0,
+    firstChoiceAcceptanceRate: completed.length
+      ? Math.round((firstChoiceAccepted / completed.length) * 100)
+      : 0,
+    averageRerolls: completed.length
+      ? Number(
+          (
+            completed.reduce((sum, session) => sum + session.rerolls, 0) /
+            completed.length
+          ).toFixed(1),
+        )
+      : 0,
+  };
+}
