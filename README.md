@@ -1,10 +1,56 @@
-# What To Eat?
+# What To Eat?｜今天吃什麼？
 
-Mobile-first food discovery, comparison, and roulette PWA.
+Mobile-first food discovery and decision PWA.
 
+## V1 product direction
 
-## Current preview
+The app is designed as a lightweight food companion that remembers how a person likes to eat, rather than only being a restaurant search screen.
 
-V0.1 includes first-run theme selection, mobile-first food roulette, nearby/demo restaurant browsing, comparison, local favorites, and PWA install support.
+### First-run flow
+1. Welcome
+2. Choose sign-in/sync intention (Google / Apple / Email / local guest)
+3. Build food preferences
+4. Set practical preferences (avoidances, dining context, walk time, per-person budget, surprise recommendations)
+5. Choose one complete visual theme and an optional mascot
 
-The GitHub Pages workflow publishes a zero-cost preview while live Google Places and Google sign-in/cloud sync are connected.
+### Four independent themes
+- A｜可愛動物系
+- B｜極簡清新系
+- C｜活潑插畫系
+- D｜美食質感系
+
+Themes are never automatically mixed. Mascot selection is independent and supports no mascot.
+
+### Main modes
+- 不知道吃什麼
+- 附近有什麼
+- 幫我選
+- 想吃這一類
+- 收藏
+- 選餐紀錄
+- 個人設定
+
+## Current implementation
+
+This repository currently includes:
+- Next.js 16 App Router
+- iPhone-first responsive UI
+- PWA manifest + service worker
+- Local persistence for profile, favorites, comparisons, and decision history
+- Migration from the earlier V0.1 theme/profile shape
+- Demo restaurant data
+- GitHub Actions build verification
+- GitHub Pages manual preview workflow
+
+## Integration gates
+
+Live integrations are intentionally separated from the UI so they can be connected without rewriting the experience:
+- Google Places / Maps
+- Supabase Auth (Google / Apple / Email)
+- Supabase cloud sync
+
+See `docs/product-spec-v1.0.md` for the current product contract.
+
+## Cost policy
+
+Free-first. Paid APIs or paid cloud resources must not be enabled without explicit confirmation.

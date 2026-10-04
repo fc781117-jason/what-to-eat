@@ -24,6 +24,7 @@ jobs:
       - run: npm install
       - run: npm run build
         env:
+          STATIC_EXPORT: "true"
           NEXT_PUBLIC_BASE_PATH: /what-to-eat
       - uses: actions/upload-pages-artifact@v3
         with:

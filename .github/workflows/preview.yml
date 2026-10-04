@@ -1,0 +1,48 @@
+name: Publish Test Preview
+
+on:
+  push:
+    branches:
+      - feature/v1-personalized-onboarding-themes
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: what-to-eat-static-preview
+  cancel-in-progress: true
+
+jobs:
+  publish-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm install
+
+      - name: Build static preview
+        run: npm run build
+        env:
+          STATIC_EXPORT: "true"
+          NEXT_PUBLIC_BASE_PATH: /fc781117-jason/what-to-eat/preview-static
+
+      - name: Publish preview branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd out
+          touch .nojekyll
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "preview: ${GITHUB_SHA}"
+          git branch -M preview-static
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin preview-static
