@@ -1,5 +1,5 @@
 export type ThemeId = "animal" | "minimal" | "illustrated" | "foodie";
-export type MascotId = "cat" | "dog" | "rabbit" | "bear" | "none";
+export type MascotId = "cat" | "dog" | "rabbit" | "fox" | "none";
 export type EntryMode = "google" | "apple" | "email" | "guest";
 export type PriceBand = "any" | "budget" | "standard" | "treat";
 export type ViewId =
@@ -9,9 +9,24 @@ export type ViewId =
   | "compare"
   | "category"
   | "favorites"
+  | "stats"
   | "history"
   | "settings"
-  | "detail";
+  | "detail"
+  | "go";
+
+export type DataSourceKind = "demo" | "google" | "official" | "ai-estimate";
+
+export type MenuItem = {
+  name: string;
+  price?: number;
+  note?: string;
+  source: DataSourceKind;
+};
+
+export type WeeklyHours = Partial<
+  Record<0 | 1 | 2 | 3 | 4 | 5 | 6, Array<[string, string]>>
+>;
 
 export type Profile = {
   name: string;
@@ -25,6 +40,7 @@ export type Profile = {
   priceBand: PriceBand;
   walk: number;
   surprise: boolean;
+  excludedRestaurantIds: string[];
   onboardingCompleted: boolean;
 };
 
@@ -33,17 +49,26 @@ export type Restaurant = {
   name: string;
   cuisine: string;
   rating: number;
+  reviewCount: number;
   walk: number;
   distance: number;
   priceMin: number;
   priceMax: number;
-  open: boolean;
-  close: string;
-  emoji: string;
+  address: string;
+  phone?: string;
+  websiteUrl?: string;
+  menuUrl?: string;
+  googleMapsUrl?: string;
+  source: DataSourceKind;
+  sourceLabel: string;
+  lastVerified: string;
+  weeklyHours: WeeklyHours;
   signature: string[];
+  menuItems: MenuItem[];
   review: string;
   hygiene: string;
   contexts: string[];
+  photoLabels: string[];
 };
 
 export type HistoryEntry = {
@@ -51,9 +76,16 @@ export type HistoryEntry = {
   restaurantId: string;
   restaurantName: string;
   cuisine: string;
-  emoji: string;
   source: "roulette" | "nearby" | "compare" | "category";
   createdAt: string;
+  decisionSeconds?: number;
+  candidateCount?: number;
+};
+
+export type DecisionSession = {
+  source: HistoryEntry["source"];
+  startedAt: number;
+  candidateCount: number;
 };
 
 export const DEFAULT_PROFILE: Profile = {
@@ -68,6 +100,7 @@ export const DEFAULT_PROFILE: Profile = {
   priceBand: "any",
   walk: 15,
   surprise: true,
+  excludedRestaurantIds: [],
   onboardingCompleted: false,
 };
 
@@ -76,38 +109,38 @@ export const THEME_OPTIONS = [
     id: "animal" as const,
     code: "A",
     name: "可愛動物系",
-    desc: "溫暖、可愛、療癒，有陪伴感",
-    note: "角色會陪你一起找吃的",
+    desc: "奶油色、圓潤卡片、角色陪伴",
+    note: "溫暖療癒，角色感最完整",
   },
   {
     id: "minimal" as const,
     code: "B",
     name: "極簡清新系",
-    desc: "乾淨、輕盈、質感，專注內容",
-    note: "留白更多、資訊閱讀最快",
+    desc: "留白、低彩度、資訊優先",
+    note: "閱讀最快，畫面最乾淨",
   },
   {
     id: "illustrated" as const,
     code: "C",
     name: "活潑插畫系",
-    desc: "年輕、活潑、有趣，色彩豐富",
-    note: "用插畫與小動態增加探索感",
+    desc: "幾何色塊、小插畫、探索感",
+    note: "年輕有趣，互動感最強",
   },
   {
     id: "foodie" as const,
     code: "D",
     name: "美食質感系",
-    desc: "精緻、美食、質感，沉浸體驗",
-    note: "讓食物與餐廳內容成為主角",
+    desc: "深色、暖金、大圖與沉浸感",
+    note: "讓餐廳與食物資訊成為主角",
   },
 ];
 
 export const MASCOTS = [
-  { id: "cat" as const, icon: "🐱", label: "貓貓" },
-  { id: "dog" as const, icon: "🐶", label: "狗狗" },
-  { id: "rabbit" as const, icon: "🐰", label: "兔兔" },
-  { id: "bear" as const, icon: "🐻", label: "熊熊" },
-  { id: "none" as const, icon: "✨", label: "不要動物" },
+  { id: "cat" as const, label: "布偶貓", note: "溫柔陪伴" },
+  { id: "dog" as const, label: "雪納瑞", note: "活潑可靠" },
+  { id: "rabbit" as const, label: "長毛兔", note: "柔軟療癒" },
+  { id: "fox" as const, label: "白狐狸", note: "靈巧好奇" },
+  { id: "none" as const, label: "不要動物", note: "純介面模式" },
 ];
 
 export const CUISINE_OPTIONS = [
@@ -152,144 +185,303 @@ export const PRICE_BANDS = [
   { id: "treat" as const, label: "犒賞 · 約 $1,000", max: 1000 },
 ];
 
+const ALL_DAYS: WeeklyHours = {
+  0: [["11:00", "21:00"]],
+  1: [["11:00", "21:00"]],
+  2: [["11:00", "21:00"]],
+  3: [["11:00", "21:00"]],
+  4: [["11:00", "21:00"]],
+  5: [["11:00", "21:30"]],
+  6: [["11:00", "21:30"]],
+};
+
+const NIGHT_HOURS: WeeklyHours = {
+  0: [["17:00", "00:30"]],
+  1: [["17:00", "00:30"]],
+  2: [["17:00", "00:30"]],
+  3: [["17:00", "00:30"]],
+  4: [["17:00", "01:00"]],
+  5: [["17:00", "01:00"]],
+  6: [["17:00", "00:30"]],
+};
+
 export const DEMO_RESTAURANTS: Restaurant[] = [
   {
     id: "r1",
     name: "老張牛肉麵",
     cuisine: "台式",
     rating: 4.6,
+    reviewCount: 1284,
     walk: 6,
     distance: 450,
     priceMin: 120,
     priceMax: 220,
-    open: true,
-    close: "21:00",
-    emoji: "🍜",
-    signature: ["紅燒牛肉麵", "滷味拼盤", "酸菜小菜"],
-    review: "湯頭與牛肉穩定，尖峰時段可能需要稍候。",
-    hygiene: "可取得評論中未見重複衛生疑慮。",
+    address: "DEMO｜正式版由 Google Places 顯示實際地址",
+    phone: undefined,
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=%E7%89%9B%E8%82%89%E9%BA%B5",
+    source: "demo",
+    sourceLabel: "Demo 測試資料",
+    lastVerified: "Preview data",
+    weeklyHours: ALL_DAYS,
+    signature: ["紅燒牛肉麵", "滷味拼盤", "燙青菜"],
+    menuItems: [
+      { name: "紅燒牛肉麵", price: 180, source: "demo" },
+      { name: "半筋半肉麵", price: 210, source: "demo" },
+      { name: "滷味拼盤", price: 100, source: "demo" },
+      { name: "燙青菜", price: 50, source: "demo" },
+    ],
+    review: "Demo 摘要：湯頭與牛肉穩定，尖峰時段可能需要稍候。",
+    hygiene: "目前尚未連接真實評論來源，正式版不會以 Demo 結論冒充即時資料。",
     contexts: ["一個人", "快速吃", "朋友"],
+    photoLabels: ["招牌牛肉麵", "店內用餐", "滷味小菜"],
   },
   {
     id: "r2",
     name: "山海小館",
     cuisine: "台式",
     rating: 4.4,
+    reviewCount: 687,
     walk: 10,
     distance: 760,
     priceMin: 280,
     priceMax: 520,
-    open: true,
-    close: "22:00",
-    emoji: "🍚",
+    address: "DEMO｜正式版由 Google Places 顯示實際地址",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=%E5%8F%B0%E8%8F%9C",
+    source: "demo",
+    sourceLabel: "Demo 測試資料",
+    lastVerified: "Preview data",
+    weeklyHours: { ...ALL_DAYS, 1: [] },
     signature: ["三杯雞", "金沙豆腐", "蛤蜊湯"],
-    review: "份量充足，適合兩人以上分享。",
-    hygiene: "近期評論多為環境整潔正向回饋。",
+    menuItems: [
+      { name: "三杯雞", price: 320, source: "demo" },
+      { name: "金沙豆腐", price: 220, source: "demo" },
+      { name: "蛤蜊湯", price: 180, source: "demo" },
+    ],
+    review: "Demo 摘要：份量充足，適合兩人以上分享。",
+    hygiene: "正式版會以可驗證評論來源重新分析。",
     contexts: ["朋友", "家庭", "慢慢聊天"],
+    photoLabels: ["招牌熱炒", "多人分享", "店內空間"],
   },
   {
     id: "r3",
     name: "夜町串燒",
     cuisine: "日式",
     rating: 4.5,
+    reviewCount: 1543,
     walk: 12,
     distance: 920,
     priceMin: 650,
     priceMax: 1100,
-    open: true,
-    close: "01:00",
-    emoji: "🍢",
+    address: "DEMO｜正式版由 Google Places 顯示實際地址",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=%E5%B1%85%E9%85%92%E5%B1%8B",
+    source: "demo",
+    sourceLabel: "Demo 測試資料",
+    lastVerified: "Preview data",
+    weeklyHours: NIGHT_HOURS,
     signature: ["明太子雞翅", "鹽烤牛舌", "烤飯糰"],
-    review: "氣氛熱鬧，假日晚間較容易客滿。",
-    hygiene: "未見明顯重複衛生警訊。",
+    menuItems: [
+      { name: "明太子雞翅", price: 220, source: "demo" },
+      { name: "鹽烤牛舌", price: 320, source: "demo" },
+      { name: "烤飯糰", price: 120, source: "demo" },
+    ],
+    review: "Demo 摘要：氣氛熱鬧，假日晚間較容易客滿。",
+    hygiene: "正式版會以真實評論與可驗證來源重新分析。",
     contexts: ["朋友", "情侶", "慢慢聊天"],
+    photoLabels: ["串燒吧台", "明太子雞翅", "夜間氛圍"],
   },
   {
     id: "r4",
     name: "春日和食堂",
     cuisine: "日式",
     rating: 4.3,
+    reviewCount: 421,
     walk: 14,
     distance: 1080,
     priceMin: 260,
     priceMax: 480,
-    open: true,
-    close: "20:30",
-    emoji: "🍣",
+    address: "DEMO｜正式版由 Google Places 顯示實際地址",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=%E6%97%A5%E5%BC%8F%E5%AE%9A%E9%A3%9F",
+    source: "demo",
+    sourceLabel: "Demo 測試資料",
+    lastVerified: "Preview data",
+    weeklyHours: { ...ALL_DAYS, 3: [] },
     signature: ["海鮮丼", "唐揚雞", "茶碗蒸"],
-    review: "餐點穩定，熱門品項晚間可能售罄。",
-    hygiene: "可取得評論中未見重大衛生議題。",
+    menuItems: [
+      { name: "海鮮丼", price: 360, source: "demo" },
+      { name: "唐揚雞定食", price: 300, source: "demo" },
+      { name: "茶碗蒸", price: 80, source: "demo" },
+    ],
+    review: "Demo 摘要：餐點穩定，熱門品項晚間可能售罄。",
+    hygiene: "正式版會以真實評論與可驗證來源重新分析。",
     contexts: ["一個人", "朋友", "家庭"],
+    photoLabels: ["海鮮丼", "定食組合", "吧台座位"],
   },
   {
     id: "r5",
     name: "暖暖石頭火鍋",
     cuisine: "火鍋",
     rating: 4.2,
+    reviewCount: 899,
     walk: 15,
     distance: 1180,
     priceMin: 380,
     priceMax: 680,
-    open: true,
-    close: "23:30",
-    emoji: "🍲",
+    address: "DEMO｜正式版由 Google Places 顯示實際地址",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=%E7%81%AB%E9%8D%8B",
+    source: "demo",
+    sourceLabel: "Demo 測試資料",
+    lastVerified: "Preview data",
+    weeklyHours: {
+      0: [["11:30", "23:00"]],
+      1: [["11:30", "23:00"]],
+      2: [["11:30", "23:00"]],
+      3: [["11:30", "23:00"]],
+      4: [["11:30", "23:00"]],
+      5: [["11:30", "23:30"]],
+      6: [["11:30", "23:30"]],
+    },
     signature: ["爆香石頭鍋", "梅花豬", "手工餃類"],
-    review: "香氣足、適合聚餐；尖峰時段環境較熱鬧。",
-    hygiene: "近期評論以桌面清潔正常為主。",
+    menuItems: [
+      { name: "梅花豬鍋", price: 420, source: "demo" },
+      { name: "霜降牛鍋", price: 520, source: "demo" },
+      { name: "手工餃拼盤", price: 160, source: "demo" },
+    ],
+    review: "Demo 摘要：香氣足、適合聚餐，尖峰時段環境較熱鬧。",
+    hygiene: "正式版會以真實評論與可驗證來源重新分析。",
     contexts: ["朋友", "家庭", "慢慢聊天"],
+    photoLabels: ["石頭火鍋", "肉盤", "多人聚餐"],
   },
   {
     id: "r6",
     name: "港邊漢堡室",
     cuisine: "美式",
     rating: 4.1,
+    reviewCount: 254,
     walk: 8,
     distance: 620,
     priceMin: 220,
     priceMax: 420,
-    open: false,
-    close: "18:00",
-    emoji: "🍔",
+    address: "DEMO｜正式版由 Google Places 顯示實際地址",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=%E6%BC%A2%E5%A0%A1",
+    source: "demo",
+    sourceLabel: "Demo 測試資料",
+    lastVerified: "Preview data",
+    weeklyHours: {
+      0: [["10:30", "18:00"]],
+      1: [["10:30", "18:00"]],
+      2: [["10:30", "18:00"]],
+      3: [["10:30", "18:00"]],
+      4: [["10:30", "18:00"]],
+      5: [["10:30", "19:00"]],
+      6: [["10:30", "19:00"]],
+    },
     signature: ["培根牛肉堡", "薯條", "奶昔"],
-    review: "份量大，但今日已結束營業。",
-    hygiene: "無足夠近期評論可判斷。",
+    menuItems: [
+      { name: "培根牛肉堡", price: 280, source: "demo" },
+      { name: "脆薯", price: 100, source: "demo" },
+      { name: "香草奶昔", price: 140, source: "demo" },
+    ],
+    review: "Demo 摘要：份量大，適合快速吃或朋友聚餐。",
+    hygiene: "正式版會以真實評論與可驗證來源重新分析。",
     contexts: ["一個人", "朋友", "快速吃"],
+    photoLabels: ["牛肉漢堡", "套餐", "美式店面"],
   },
   {
     id: "r7",
     name: "慢慢咖哩",
     cuisine: "咖哩",
     rating: 4.7,
+    reviewCount: 932,
     walk: 7,
     distance: 510,
     priceMin: 180,
     priceMax: 320,
-    open: true,
-    close: "20:00",
-    emoji: "🍛",
+    address: "DEMO｜正式版由 Google Places 顯示實際地址",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=%E5%92%96%E5%93%A9",
+    source: "demo",
+    sourceLabel: "Demo 測試資料",
+    lastVerified: "Preview data",
+    weeklyHours: { ...ALL_DAYS, 2: [] },
     signature: ["熟成牛肉咖哩", "炸雞咖哩", "布丁"],
-    review: "評分高、座位不多，尖峰時段建議提早到。",
-    hygiene: "近期可取得評論多為整潔正向訊號。",
+    menuItems: [
+      { name: "熟成牛肉咖哩", price: 260, source: "demo" },
+      { name: "炸雞咖哩", price: 240, source: "demo" },
+      { name: "焦糖布丁", price: 90, source: "demo" },
+    ],
+    review: "Demo 摘要：評分高、座位不多，尖峰時段建議提早到。",
+    hygiene: "正式版會以真實評論與可驗證來源重新分析。",
     contexts: ["一個人", "情侶", "快速吃"],
+    photoLabels: ["熟成咖哩", "炸雞咖哩", "焦糖布丁"],
   },
   {
     id: "r8",
     name: "小島冰室",
     cuisine: "咖啡甜點",
     rating: 4.4,
+    reviewCount: 718,
     walk: 5,
     distance: 350,
     priceMin: 120,
     priceMax: 260,
-    open: true,
-    close: "22:30",
-    emoji: "🍧",
+    address: "DEMO｜正式版由 Google Places 顯示實際地址",
+    googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=%E7%94%9C%E9%BB%9E",
+    source: "demo",
+    sourceLabel: "Demo 測試資料",
+    lastVerified: "Preview data",
+    weeklyHours: {
+      0: [["12:00", "22:30"]],
+      1: [["12:00", "22:30"]],
+      2: [["12:00", "22:30"]],
+      3: [["12:00", "22:30"]],
+      4: [["12:00", "22:30"]],
+      5: [["12:00", "23:00"]],
+      6: [["12:00", "23:00"]],
+    },
     signature: ["芒果冰", "焦糖布丁", "奶茶"],
-    review: "適合飯後續攤，甜度偏高。",
-    hygiene: "未見重複衛生負評。",
+    menuItems: [
+      { name: "芒果冰", price: 220, source: "demo" },
+      { name: "焦糖布丁", price: 90, source: "demo" },
+      { name: "鮮奶茶", price: 110, source: "demo" },
+    ],
+    review: "Demo 摘要：適合飯後續攤，甜度偏高。",
+    hygiene: "正式版會以真實評論與可驗證來源重新分析。",
     contexts: ["朋友", "情侶", "慢慢聊天"],
+    photoLabels: ["芒果冰", "焦糖布丁", "午後甜點"],
   },
 ];
+
+function minutesOf(text: string) {
+  const [hour, minute] = text.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+export function restaurantOpenState(restaurant: Restaurant, now = new Date()) {
+  const day = now.getDay() as 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  const minute = now.getHours() * 60 + now.getMinutes();
+  const intervals = restaurant.weeklyHours[day] ?? [];
+
+  for (const [startText, endText] of intervals) {
+    const start = minutesOf(startText);
+    const end = minutesOf(endText);
+    if (end > start && minute >= start && minute < end) {
+      return { open: true, label: `營業中 · ${endText} 打烊` };
+    }
+    if (end <= start && (minute >= start || minute < end)) {
+      return { open: true, label: `營業中 · ${endText} 打烊` };
+    }
+  }
+
+  const prevDay = ((day + 6) % 7) as 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  for (const [startText, endText] of restaurant.weeklyHours[prevDay] ?? []) {
+    const start = minutesOf(startText);
+    const end = minutesOf(endText);
+    if (end <= start && minute < end) {
+      return { open: true, label: `營業中 · ${endText} 打烊` };
+    }
+  }
+
+  return { open: false, label: "目前休息" };
+}
 
 export function moneyText(min: number, max: number) {
   return `NT$ ${min}–${max}`;
@@ -314,9 +506,15 @@ export function normalizeStoredProfile(input: unknown): Profile {
     illustrated: "illustrated",
     foodie: "foodie",
   };
-  const mascot = ["cat", "dog", "rabbit", "bear", "none"].includes(String(raw.mascot))
-    ? (raw.mascot as MascotId)
-    : "cat";
+
+  const mascotMap: Record<string, MascotId> = {
+    cat: "cat",
+    dog: "dog",
+    rabbit: "rabbit",
+    bear: "fox",
+    fox: "fox",
+    none: "none",
+  };
 
   return {
     ...DEFAULT_PROFILE,
@@ -326,7 +524,7 @@ export function normalizeStoredProfile(input: unknown): Profile {
       : "guest",
     email: typeof raw.email === "string" ? raw.email : "",
     theme: themeMap[oldTheme] ?? "animal",
-    mascot,
+    mascot: mascotMap[String(raw.mascot)] ?? "cat",
     favoriteCuisines: Array.isArray(raw.favoriteCuisines)
       ? raw.favoriteCuisines.filter((x): x is string => typeof x === "string")
       : [],
@@ -347,6 +545,9 @@ export function normalizeStoredProfile(input: unknown): Profile {
         : "any",
     walk: typeof raw.walk === "number" ? raw.walk : 15,
     surprise: typeof raw.surprise === "boolean" ? raw.surprise : true,
+    excludedRestaurantIds: Array.isArray(raw.excludedRestaurantIds)
+      ? raw.excludedRestaurantIds.filter((x): x is string => typeof x === "string")
+      : [],
     onboardingCompleted:
       typeof raw.onboardingCompleted === "boolean"
         ? raw.onboardingCompleted
