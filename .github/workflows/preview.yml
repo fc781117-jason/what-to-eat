@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/v1-personalized-onboarding-themes
+      - feature/v2-functional-ux
   workflow_dispatch:
 
 permissions:
