@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Mascot from "../components/Mascot";
 import {
+  buildDecisionBehaviorStats,
   buildFoodStats,
   filterHistoryByPeriod,
   formatDecisionDuration,
@@ -28,11 +29,22 @@ import {
   type ViewId,
 } from "../lib/product";
 import { rankRestaurants, recommendationHint, weightedPick } from "../lib/recommendation";
+import {
+  abandonDecisionSession,
+  completeDecisionSession,
+  createDecisionSession,
+  pauseDecisionSession,
+  recordDecisionEvent,
+  resumeDecisionSession,
+  successfulDecisionSeconds,
+  type DecisionSession,
+} from "../lib/decision-session";
 
 const PROFILE_KEY = "wte_profile";
 const FAVORITES_KEY = "wte_favorites";
 const COMPARE_KEY = "wte_compare";
 const HISTORY_KEY = "wte_history";
+const DECISION_SESSIONS_KEY = "wte_decision_sessions_v2";
 
 function toggleValue(list: string[], value: string) {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
@@ -64,8 +76,8 @@ export default function V15Client() {
   const [spinning, setSpinning] = useState(false);
   const [rouletteWinner, setRouletteWinner] = useState<Restaurant | null>(null);
   const [skipIds, setSkipIds] = useState<string[]>([]);
-  const [decisionStartedAt, setDecisionStartedAt] = useState<number | null>(null);
-  const [decisionCandidates, setDecisionCandidates] = useState(0);
+  const [activeDecision, setActiveDecision] = useState<DecisionSession | null>(null);
+  const [decisionSessions, setDecisionSessions] = useState<DecisionSession[]>([]);
   const [location, setLocation] = useState<ResolvedLocation | null>(null);
   const [locationStatus, setLocationStatus] = useState("尚未定位");
   const [installTip, setInstallTip] = useState(false);
@@ -85,6 +97,8 @@ export default function V15Client() {
       if (cmp) setCompare(JSON.parse(cmp));
       const hist = localStorage.getItem(HISTORY_KEY);
       if (hist) setHistory(JSON.parse(hist));
+      const sessions = localStorage.getItem(DECISION_SESSIONS_KEY);
+      if (sessions) setDecisionSessions(JSON.parse(sessions));
     } catch {}
 
     const nav = navigator as Navigator & { standalone?: boolean };
@@ -110,7 +124,8 @@ export default function V15Client() {
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
     localStorage.setItem(COMPARE_KEY, JSON.stringify(compare));
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-  }, [profile, favorites, compare, history, hydrated]);
+    localStorage.setItem(DECISION_SESSIONS_KEY, JSON.stringify(decisionSessions.slice(0, 500)));
+  }, [profile, favorites, compare, history, decisionSessions, hydrated]);
 
   const budgetMax = priceBandMax(profile.priceBand);
 
@@ -160,9 +175,23 @@ export default function V15Client() {
     [history, statsPeriod],
   );
 
+  const decisionStats = useMemo(() => {
+    const now = Date.now();
+    const days = statsPeriod === "week" ? 7 : statsPeriod === "month" ? 30 : statsPeriod === "year" ? 365 : null;
+    const filtered = days
+      ? decisionSessions.filter((session) => session.startedAt >= now - days * 86400000)
+      : decisionSessions;
+    return buildDecisionBehaviorStats(filtered);
+  }, [decisionSessions, statsPeriod]);
+
   function beginDecision(source: HistoryEntry["source"], candidates: number, nextView: ViewId) {
-    setDecisionStartedAt(Date.now());
-    setDecisionCandidates(candidates);
+    const session = createDecisionSession(source);
+    const candidateIds =
+      source === "compare"
+        ? compare
+        : eligible.slice(0, Math.max(0, candidates)).map((restaurant) => restaurant.id);
+
+    setActiveDecision({ ...session, candidateIds });
     setSelectedSource(source);
     if (source === "roulette") {
       setRouletteWinner(null);
@@ -172,10 +201,11 @@ export default function V15Client() {
   }
 
   function recordDecision(restaurant: Restaurant, source = selectedSource) {
-    const seconds = decisionStartedAt
-      ? Math.max(1, Math.round((Date.now() - decisionStartedAt) / 1000))
-      : undefined;
+    const completed = activeDecision
+      ? completeDecisionSession(activeDecision, { restaurantId: restaurant.id })
+      : completeDecisionSession(createDecisionSession(source), { restaurantId: restaurant.id });
 
+    const seconds = successfulDecisionSeconds(completed) ?? undefined;
     const entry: HistoryEntry = {
       id: restaurant.id + "-" + Date.now(),
       restaurantId: restaurant.id,
@@ -184,12 +214,12 @@ export default function V15Client() {
       source,
       createdAt: new Date().toISOString(),
       decisionSeconds: seconds,
-      candidateCount: source === "compare" ? Math.max(compare.length, decisionCandidates) || undefined : decisionCandidates || undefined,
+      candidateCount: completed.candidateIds.length || undefined,
     };
 
+    setDecisionSessions((current) => [completed, ...current].slice(0, 500));
     setHistory((current) => [entry, ...current].slice(0, 200));
-    setDecisionStartedAt(null);
-    setDecisionCandidates(0);
+    setActiveDecision(null);
     setSelected(restaurant);
     setView("go");
   }
@@ -209,6 +239,9 @@ export default function V15Client() {
   }
 
   function excludeRestaurant(id: string) {
+    if (activeDecision) {
+      setActiveDecision(recordDecisionEvent(activeDecision, "exclude_permanent", { candidateId: id }));
+    }
     setProfile((current) => ({
       ...current,
       excludedRestaurantIds: [...new Set([...current.excludedRestaurantIds, id])],
@@ -230,6 +263,9 @@ export default function V15Client() {
 
   function spin() {
     if (spinning || !roulettePool.length) return;
+    if (activeDecision && rouletteWinner) {
+      setActiveDecision(recordDecisionEvent(activeDecision, "reroll"));
+    }
     setSpinning(true);
     setRouletteWinner(null);
     window.setTimeout(() => {
@@ -240,10 +276,10 @@ export default function V15Client() {
   }
 
   function openDetail(restaurant: Restaurant, source: HistoryEntry["source"]) {
-    if (!decisionStartedAt) {
-      setDecisionStartedAt(Date.now());
-      setDecisionCandidates(source === "compare" ? Math.max(compare.length, 1) : 1);
-    }
+    const base = activeDecision ?? createDecisionSession(source);
+    let next = recordDecisionEvent(base, "candidate_view", { candidateId: restaurant.id });
+    next = recordDecisionEvent(next, "restaurant_detail_view");
+    setActiveDecision(next);
     setSelected(restaurant);
     setSelectedSource(source);
     setView("detail");
@@ -285,6 +321,8 @@ export default function V15Client() {
     setFavorites([]);
     setCompare([]);
     setHistory([]);
+    setDecisionSessions([]);
+    setActiveDecision(null);
     setOnboardingStep(0);
     setView("home");
   }
