@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Mascot from "../components/Mascot";
+import { buildFoodStats, filterHistoryByPeriod, formatDecisionDuration, type StatsPeriod } from "../lib/analytics";
+import { resolveBrowserLocation, type ResolvedLocation } from "../lib/location";
 import {
   AVOIDANCE_OPTIONS,
   CUISINE_OPTIONS,
@@ -15,6 +18,7 @@ import {
   priceBandMax,
   Profile,
   Restaurant,
+  restaurantOpenState,
   THEME_OPTIONS,
   ViewId,
 } from "../lib/product";
@@ -56,6 +60,12 @@ export default function HomePage() {
   const [slotRestaurant, setSlotRestaurant] = useState("準備好了嗎？");
   const [locationText, setLocationText] = useState("尚未定位");
   const [installTip, setInstallTip] = useState(false);
+  const [platform, setPlatform] = useState<"ios"|"android"|"desktop"|"standalone">("desktop");
+  const [resolvedLocation, setResolvedLocation] = useState<ResolvedLocation | null>(null);
+  const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>("month");
+  const [decisionStartedAt, setDecisionStartedAt] = useState<number | null>(null);
+  const [decisionSource, setDecisionSource] = useState<HistoryEntry["source"]>("category");
+  const [skipIds, setSkipIds] = useState<string[]>([]);
 
   useEffect(() => {
     try {
@@ -78,6 +88,10 @@ export default function HomePage() {
       const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
       navigator.serviceWorker.register(`${base}/sw.js`).catch(() => {});
     }
+    const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+    if (standalone) setPlatform("standalone");
+    else if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) setPlatform("ios");
+    else if (/Android/i.test(navigator.userAgent)) setPlatform("android");
     setHydrated(true);
   }, []);
 
@@ -96,13 +110,14 @@ export default function HomePage() {
   const eligible = useMemo(
     () =>
       DEMO_RESTAURANTS.filter((restaurant) => {
-        if (onlyOpen && !restaurant.open) return false;
+        if (profile.excludedRestaurantIds.includes(restaurant.id)) return false;
+        if (onlyOpen && !restaurantOpenState(restaurant).open) return false;
         if (profile.walk && restaurant.walk > profile.walk) return false;
         if (budgetMax && restaurant.priceMin > budgetMax) return false;
         if (minRating && restaurant.rating < minRating) return false;
         return true;
       }),
-    [onlyOpen, profile.walk, budgetMax, minRating],
+    [onlyOpen, profile.walk, budgetMax, minRating, profile.excludedRestaurantIds],
   );
 
   const recommended = useMemo(
