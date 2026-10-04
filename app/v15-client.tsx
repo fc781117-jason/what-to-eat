@@ -184,7 +184,7 @@ export default function V15Client() {
       source,
       createdAt: new Date().toISOString(),
       decisionSeconds: seconds,
-      candidateCount: decisionCandidates || undefined,
+      candidateCount: source === "compare" ? Math.max(compare.length, decisionCandidates) || undefined : decisionCandidates || undefined,
     };
 
     setHistory((current) => [entry, ...current].slice(0, 200));
@@ -240,12 +240,20 @@ export default function V15Client() {
   }
 
   function openDetail(restaurant: Restaurant, source: HistoryEntry["source"]) {
+    if (!decisionStartedAt) {
+      setDecisionStartedAt(Date.now());
+      setDecisionCandidates(source === "compare" ? Math.max(compare.length, 1) : 1);
+    }
     setSelected(restaurant);
     setSelectedSource(source);
     setView("detail");
   }
 
   function addCompareFromInput(raw: string) {
+    if (!raw.trim()) {
+      setCompareNotice("請先貼上 Google Maps 網址或輸入餐廳名稱。");
+      return;
+    }
     const text = decodeURIComponent(raw).replace(/\+/g, " ");
     let matched = DEMO_RESTAURANTS.find(
       (restaurant) => text.includes(restaurant.name) || restaurant.name.includes(text.trim()),
