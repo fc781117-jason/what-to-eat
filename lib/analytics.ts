@@ -10,7 +10,10 @@ export type FoodStats = {
   slowDecisions: number;
   topCuisine: string | null;
   topRestaurant: string | null;
+  topDish: string | null;
   cuisineCounts: Array<{ label: string; value: number }>;
+  restaurantCounts: Array<{ label: string; value: number }>;
+  dishCounts: Array<{ label: string; value: number }>;
   sourceCounts: Array<{ label: string; value: number }>;
 };
 
@@ -30,6 +33,13 @@ function topLabel(values: string[]) {
   const counts = new Map<string, number>();
   values.forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1));
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+function counts(values: string[]) {
+  const map = new Map<string, number>();
+  values.filter(Boolean).forEach((value) => map.set(value, (map.get(value) ?? 0) + 1));
+  return [...map].map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
 export function buildFoodStats(history: HistoryEntry[]): FoodStats {
@@ -62,6 +72,9 @@ export function buildFoodStats(history: HistoryEntry[]): FoodStats {
     slowDecisions: durations.filter((seconds) => seconds >= 600).length,
     topCuisine: topLabel(history.map((entry) => entry.cuisine)),
     topRestaurant: topLabel(history.map((entry) => entry.restaurantName)),
+    topDish: topLabel(history.map((entry) => entry.dishName).filter((x): x is string => !!x)),
+    restaurantCounts: counts(history.map((entry) => entry.restaurantName)),
+    dishCounts: counts(history.map((entry) => entry.dishName).filter((x): x is string => !!x)),
     cuisineCounts: [...cuisineMap.entries()]
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => b.value - a.value),
@@ -89,9 +102,19 @@ export type DecisionBehaviorStats = {
   medianActiveSeconds: number;
   fastestActiveSeconds: number | null;
   slowDecisions: number;
+  overFiveMinutes: number;
+  overTenMinutes: number;
   abandonmentRate: number;
   firstChoiceAcceptanceRate: number;
   averageRerolls: number;
+  averageCandidates: number;
+  restaurantDetailViews: number;
+  dishDetailViews: number;
+  filterChanges: number;
+  rerolls: number;
+  skips: number;
+  permanentExclusions: number;
+  averageElapsedSeconds: number;
 };
 
 function median(values: number[]) {
@@ -110,10 +133,13 @@ export function buildDecisionBehaviorStats(
   const abandoned = sessions.filter((session) => session.status === "abandoned");
   const durations = completed
     .map((session) => Math.round(session.activeMs / 1000))
-    .filter((seconds) => seconds > 0);
+    .filter((seconds) => Number.isFinite(seconds) && seconds >= 0);
 
   const totalSessions = completed.length + abandoned.length;
-  const firstChoiceAccepted = completed.filter((session) => session.rerolls === 0).length;
+  const firstChoiceAccepted = completed.filter((session) =>
+    session.candidateIds[0] === session.finalRestaurantId && session.rerolls === 0 && session.skipOnceCount === 0,
+  ).length;
+  const finished = [...completed, ...abandoned];
 
   return {
     completed: completed.length,
@@ -123,7 +149,9 @@ export function buildDecisionBehaviorStats(
       : 0,
     medianActiveSeconds: median(durations),
     fastestActiveSeconds: durations.length ? Math.min(...durations) : null,
-    slowDecisions: durations.filter((seconds) => seconds >= 600).length,
+    slowDecisions: durations.filter((seconds) => seconds > 600).length,
+    overFiveMinutes: durations.filter((seconds) => seconds > 300).length,
+    overTenMinutes: durations.filter((seconds) => seconds > 600).length,
     abandonmentRate: totalSessions
       ? Math.round((abandoned.length / totalSessions) * 100)
       : 0,
@@ -138,5 +166,14 @@ export function buildDecisionBehaviorStats(
           ).toFixed(1),
         )
       : 0,
+    averageCandidates: finished.length ? Number((finished.reduce((sum, s) => sum + s.candidateIds.length, 0) / finished.length).toFixed(1)) : 0,
+    restaurantDetailViews: finished.reduce((sum, s) => sum + s.restaurantDetailViews, 0),
+    dishDetailViews: finished.reduce((sum, s) => sum + s.dishDetailViews, 0),
+    filterChanges: finished.reduce((sum, s) => sum + s.filterChanges, 0),
+    rerolls: finished.reduce((sum, s) => sum + s.rerolls, 0),
+    skips: finished.reduce((sum, s) => sum + s.skipOnceCount, 0),
+    permanentExclusions: finished.reduce((sum, s) => sum + s.exclusions, 0),
+    averageElapsedSeconds: finished.length ? Math.round(finished.reduce((sum, s) =>
+      sum + ((s.completedAt ?? s.abandonedAt ?? s.startedAt) - s.startedAt) / 1000, 0) / finished.length) : 0,
   };
 }

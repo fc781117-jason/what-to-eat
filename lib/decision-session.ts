@@ -7,6 +7,7 @@ export type DecisionEvent =
   | "restaurant_detail_view"
   | "dish_detail_view"
   | "filter_change"
+  | "compare_change"
   | "reroll"
   | "skip_once"
   | "exclude_permanent"
@@ -21,6 +22,7 @@ export type DecisionSession = {
   status: DecisionStatus;
   startedAt: number;
   lastActiveAt: number;
+  lastInteractionAt: number;
   completedAt?: number;
   abandonedAt?: number;
   activeMs: number;
@@ -32,6 +34,7 @@ export type DecisionSession = {
   skipOnceCount: number;
   exclusions: number;
   filterChanges: number;
+  compareChanges: number;
   finalRestaurantId?: string;
   finalDishId?: string;
 };
@@ -43,6 +46,7 @@ export function createDecisionSession(mode: DecisionMode, now = Date.now()): Dec
     status: "active",
     startedAt: now,
     lastActiveAt: now,
+    lastInteractionAt: now,
     activeMs: 0,
     candidateIds: [],
     restaurantDetailViews: 0,
@@ -51,6 +55,7 @@ export function createDecisionSession(mode: DecisionMode, now = Date.now()): Dec
     skipOnceCount: 0,
     exclusions: 0,
     filterChanges: 0,
+    compareChanges: 0,
   };
 }
 
@@ -64,6 +69,7 @@ function accrueActiveTime(session: DecisionSession, now: number) {
 }
 
 export function pauseDecisionSession(session: DecisionSession, now = Date.now()): DecisionSession {
+  if (session.status !== "active") return session;
   const accrued = accrueActiveTime(session, now);
   return {
     ...accrued,
@@ -78,6 +84,7 @@ export function resumeDecisionSession(session: DecisionSession, now = Date.now()
     ...session,
     status: "active",
     lastActiveAt: now,
+    lastInteractionAt: now,
     pausedAt: undefined,
   };
 }
@@ -87,6 +94,7 @@ export function completeDecisionSession(
   result: { restaurantId: string; dishId?: string },
   now = Date.now(),
 ): DecisionSession {
+  if (session.status === "completed" || session.status === "abandoned") return session;
   const accrued = accrueActiveTime(session, now);
   return {
     ...accrued,
@@ -98,6 +106,7 @@ export function completeDecisionSession(
 }
 
 export function abandonDecisionSession(session: DecisionSession, now = Date.now()): DecisionSession {
+  if (session.status === "completed" || session.status === "abandoned") return session;
   const accrued = accrueActiveTime(session, now);
   return {
     ...accrued,
@@ -112,7 +121,9 @@ export function recordDecisionEvent(
   payload: { candidateId?: string } = {},
   now = Date.now(),
 ): DecisionSession {
+  if (session.status !== "active") return session;
   const current = accrueActiveTime(session, now);
+  current.lastInteractionAt = now;
 
   if (event === "candidate_view" && payload.candidateId) {
     return {
@@ -135,8 +146,15 @@ export function recordDecisionEvent(
   if (event === "skip_once") return { ...current, skipOnceCount: current.skipOnceCount + 1 };
   if (event === "exclude_permanent") return { ...current, exclusions: current.exclusions + 1 };
   if (event === "filter_change") return { ...current, filterChanges: current.filterChanges + 1 };
+  if (event === "compare_change") return { ...current, compareChanges: current.compareChanges + 1 };
 
   return current;
+}
+
+export const DECISION_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+
+export function hasDecisionTimedOut(session: DecisionSession, now = Date.now()) {
+  return session.status === "active" && now - (session.lastInteractionAt ?? session.startedAt) >= DECISION_IDLE_TIMEOUT_MS;
 }
 
 export function successfulDecisionSeconds(session: DecisionSession) {

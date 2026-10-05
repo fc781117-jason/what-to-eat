@@ -27,6 +27,9 @@ jobs:
       - name: Install
         run: npm install
 
+      - name: Functional tests
+        run: npm test
+
       - name: Build static preview
         run: npm run build
         env:

@@ -2275,3 +2275,18 @@ select:focus-visible {
   .compareCard{min-width:88%}
   .galleryCard{min-width:92%;min-height:225px}
 }
+.rankingRow {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  margin: 5px 0;
+  text-align: left;
+  border: 1px solid var(--line, #ddd);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.detailCard textarea.textInput { min-height: 84px; resize: vertical; }
+.periodTabs { display: flex; gap: 6px; overflow-x: auto; }
+.periodTabs button { flex-shrink: 0; }

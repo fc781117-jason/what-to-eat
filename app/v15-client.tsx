@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Mascot from "../components/Mascot";
 import {
   buildDecisionBehaviorStats,
@@ -17,6 +17,7 @@ import {
   DEMO_RESTAURANTS,
   DINING_CONTEXT_OPTIONS,
   type HistoryEntry,
+  type Dish,
   MASCOTS,
   moneyText,
   normalizeStoredProfile,
@@ -28,11 +29,13 @@ import {
   THEME_OPTIONS,
   type ViewId,
 } from "../lib/product";
-import { rankRestaurants, recommendationHint, weightedPick } from "../lib/recommendation";
+import { rankRestaurants, recommendationHint, scoreRestaurant, weightedPick } from "../lib/recommendation";
+import { dishesFor, parseGoogleMapsInput } from "../lib/functional-data";
 import {
   abandonDecisionSession,
   completeDecisionSession,
   createDecisionSession,
+  hasDecisionTimedOut,
   pauseDecisionSession,
   recordDecisionEvent,
   resumeDecisionSession,
@@ -45,6 +48,10 @@ const FAVORITES_KEY = "wte_favorites";
 const COMPARE_KEY = "wte_compare";
 const HISTORY_KEY = "wte_history";
 const DECISION_SESSIONS_KEY = "wte_decision_sessions_v2";
+const ACTIVE_DECISION_KEY = "wte_active_decision_v2";
+const FOOD_DATABASE_KEY = "wte_food_database_v2";
+type FoodDatabase = { toTry: string[]; visited: string[]; notes: Record<string, string>; tags: Record<string, string[]>; lists: Record<string, string[]> };
+const EMPTY_DATABASE: FoodDatabase = { toTry: [], visited: [], notes: {}, tags: {}, lists: {} };
 
 function toggleValue(list: string[], value: string) {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
@@ -65,6 +72,10 @@ export default function V15Client() {
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [view, setView] = useState<ViewId>("home");
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [foodDatabase, setFoodDatabase] = useState<FoodDatabase>(EMPTY_DATABASE);
+  const [savedTab, setSavedTab] = useState<"favorites" | "toTry" | "visited">("favorites");
+  const [newListName, setNewListName] = useState("");
+  const [newTag, setNewTag] = useState("");
   const [compare, setCompare] = useState<string[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [selected, setSelected] = useState<Restaurant | null>(null);
@@ -77,6 +88,7 @@ export default function V15Client() {
   const [rouletteWinner, setRouletteWinner] = useState<Restaurant | null>(null);
   const [skipIds, setSkipIds] = useState<string[]>([]);
   const [activeDecision, setActiveDecision] = useState<DecisionSession | null>(null);
+  const activeDecisionRef = useRef<DecisionSession | null>(null);
   const [decisionSessions, setDecisionSessions] = useState<DecisionSession[]>([]);
   const [location, setLocation] = useState<ResolvedLocation | null>(null);
   const [locationStatus, setLocationStatus] = useState("尚未定位");
@@ -85,6 +97,11 @@ export default function V15Client() {
   const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>("month");
   const [compareInputs, setCompareInputs] = useState(["", ""]);
   const [compareNotice, setCompareNotice] = useState("");
+  const [selectedDish, setSelectedDish] = useState<Dish | null>(null);
+  const [rouletteCuisine, setRouletteCuisine] = useState<string | null>(null);
+  const [nearbyMode, setNearbyMode] = useState<"list" | "map">("list");
+  const [manualArea, setManualArea] = useState("");
+  const [statsDrilldown, setStatsDrilldown] = useState<{ type: "cuisine" | "restaurant" | "dish"; label: string } | null>(null);
   const [clock, setClock] = useState(Date.now());
 
   useEffect(() => {
@@ -93,12 +110,26 @@ export default function V15Client() {
       if (raw) setProfile(normalizeStoredProfile(JSON.parse(raw)));
       const fav = localStorage.getItem(FAVORITES_KEY);
       if (fav) setFavorites(JSON.parse(fav));
+      const database = localStorage.getItem(FOOD_DATABASE_KEY);
+      if (database) setFoodDatabase({ ...EMPTY_DATABASE, ...JSON.parse(database) });
       const cmp = localStorage.getItem(COMPARE_KEY);
       if (cmp) setCompare(JSON.parse(cmp));
       const hist = localStorage.getItem(HISTORY_KEY);
       if (hist) setHistory(JSON.parse(hist));
       const sessions = localStorage.getItem(DECISION_SESSIONS_KEY);
       if (sessions) setDecisionSessions(JSON.parse(sessions));
+      const active = localStorage.getItem(ACTIVE_DECISION_KEY);
+      if (active) {
+        const stored = JSON.parse(active) as DecisionSession;
+        if (stored?.id && (stored.status === "active" || stored.status === "paused")) {
+          // A restored page was not observable while closed, so resume from the saved instant.
+          const paused = stored.status === "active" ? pauseDecisionSession(stored, stored.lastActiveAt) : stored;
+          const next = Date.now() - (paused.lastInteractionAt ?? paused.startedAt) > 15 * 60 * 1000
+            ? abandonDecisionSession(paused) : resumeDecisionSession(paused);
+          if (next.status === "abandoned") setDecisionSessions((current) => [next, ...current].slice(0, 500));
+          else { activeDecisionRef.current = next; setActiveDecision(next); setView(next.mode); }
+        }
+      }
     } catch {}
 
     const nav = navigator as Navigator & { standalone?: boolean };
@@ -122,27 +153,50 @@ export default function V15Client() {
     document.documentElement.dataset.theme = profile.theme;
     localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+    localStorage.setItem(FOOD_DATABASE_KEY, JSON.stringify(foodDatabase));
     localStorage.setItem(COMPARE_KEY, JSON.stringify(compare));
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
     localStorage.setItem(DECISION_SESSIONS_KEY, JSON.stringify(decisionSessions.slice(0, 500)));
-  }, [profile, favorites, compare, history, decisionSessions, hydrated]);
+  }, [profile, favorites, foodDatabase, compare, history, decisionSessions, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (activeDecision) localStorage.setItem(ACTIVE_DECISION_KEY, JSON.stringify(activeDecision));
+    else localStorage.removeItem(ACTIVE_DECISION_KEY);
+  }, [activeDecision, hydrated]);
 
   useEffect(() => {
     function onVisibilityChange() {
-      setActiveDecision((current) => {
-        if (!current) return current;
-        if (document.visibilityState === "hidden" && current.status === "active") {
-          return pauseDecisionSession(current);
-        }
-        if (document.visibilityState === "visible" && current.status === "paused") {
-          return resumeDecisionSession(current);
-        }
-        return current;
-      });
+      const current = activeDecisionRef.current;
+      if (!current) return;
+      const next = document.visibilityState === "hidden" ? pauseDecisionSession(current) : resumeDecisionSession(current);
+      activeDecisionRef.current = next;
+      setActiveDecision(next);
+      if (document.visibilityState === "hidden") localStorage.setItem(ACTIVE_DECISION_KEY, JSON.stringify(next));
+    }
+
+    function onPageHide() {
+      const current = activeDecisionRef.current;
+      if (current) localStorage.setItem(ACTIVE_DECISION_KEY, JSON.stringify(pauseDecisionSession(current)));
     }
 
     document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", onPageHide);
+    const idle = window.setInterval(() => {
+      const current = activeDecisionRef.current;
+      if (current && hasDecisionTimedOut(current)) {
+        const ended = abandonDecisionSession(current);
+        activeDecisionRef.current = null;
+        setActiveDecision(null);
+        setDecisionSessions((items) => [ended, ...items].slice(0, 500));
+        setView("home");
+      }
+    }, 15000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", onPageHide);
+      window.clearInterval(idle);
+    };
   }, []);
 
   const budgetMax = priceBandMax(profile.priceBand);
@@ -166,14 +220,13 @@ export default function V15Client() {
   );
 
   const roulettePool = useMemo(
-    () => eligible.filter((restaurant) => !skipIds.includes(restaurant.id)),
-    [eligible, skipIds],
+    () => eligible.filter((restaurant) => !skipIds.includes(restaurant.id) && (!rouletteCuisine || restaurant.cuisine === rouletteCuisine)),
+    [eligible, skipIds, rouletteCuisine],
   );
 
   const categoryResults = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return DEMO_RESTAURANTS.filter((restaurant) => {
-      if (profile.excludedRestaurantIds.includes(restaurant.id)) return false;
+    return eligible.filter((restaurant) => {
       if (selectedCuisine !== "全部" && restaurant.cuisine !== selectedCuisine) return false;
       if (!q) return true;
       return (
@@ -182,11 +235,23 @@ export default function V15Client() {
         restaurant.signature.some((dish) => dish.toLowerCase().includes(q))
       );
     });
-  }, [search, selectedCuisine, profile.excludedRestaurantIds]);
+  }, [search, selectedCuisine, eligible]);
 
-  const compareRestaurants = compare
+  const compareRestaurants = compare.filter((id) => !profile.excludedRestaurantIds.includes(id))
     .map((id) => DEMO_RESTAURANTS.find((restaurant) => restaurant.id === id))
     .filter(Boolean) as Restaurant[];
+  const compareWinner = compareRestaurants.length >= 2 ? rankRestaurants(compareRestaurants, profile)[0] : null;
+
+  function toggleTry(id: string) {
+    setFoodDatabase((current) => ({ ...current, toTry: toggleValue(current.toTry, id) }));
+  }
+
+  function chooseCuisine(value: string | null) {
+    setRouletteCuisine(value);
+    setRouletteWinner(null);
+    setSkipIds([]);
+    eventInSession("filter_change");
+  }
 
   const stats = useMemo(
     () => buildFoodStats(filterHistoryByPeriod(history, statsPeriod)),
@@ -202,26 +267,39 @@ export default function V15Client() {
     return buildDecisionBehaviorStats(filtered);
   }, [decisionSessions, statsPeriod]);
 
-  function beginDecision(source: HistoryEntry["source"], candidates: number, nextView: ViewId) {
-    const session = createDecisionSession(source);
-    const candidateIds =
-      source === "compare"
-        ? compare
-        : eligible.slice(0, Math.max(0, candidates)).map((restaurant) => restaurant.id);
+  function updateActive(next: DecisionSession | null) {
+    activeDecisionRef.current = next;
+    setActiveDecision(next);
+  }
 
-    setActiveDecision({ ...session, candidateIds });
+  function eventInSession(event: Parameters<typeof recordDecisionEvent>[1], candidateId?: string) {
+    const current = activeDecisionRef.current;
+    if (current) updateActive(recordDecisionEvent(current, event, { candidateId }));
+  }
+
+  function beginDecision(source: HistoryEntry["source"], _candidates: number, nextView: ViewId) {
+    const existing = activeDecisionRef.current;
+    if (existing) setDecisionSessions((current) => [abandonDecisionSession(existing), ...current].slice(0, 500));
+    const session = source === "compare" && compare[0]
+      ? recordDecisionEvent(createDecisionSession(source), "candidate_view", { candidateId: compare[0] })
+      : createDecisionSession(source);
+    updateActive(session);
     setSelectedSource(source);
     if (source === "roulette") {
       setRouletteWinner(null);
       setSkipIds([]);
+      setRouletteCuisine(null);
     }
     setView(nextView);
   }
 
-  function recordDecision(restaurant: Restaurant, source = selectedSource) {
-    const completed = activeDecision
-      ? completeDecisionSession(activeDecision, { restaurantId: restaurant.id })
-      : completeDecisionSession(createDecisionSession(source), { restaurantId: restaurant.id });
+  function recordDecision(restaurant: Restaurant, source = selectedSource, dish?: Dish) {
+    const inProgress = activeDecisionRef.current;
+    if (!inProgress || (inProgress.status !== "active" && inProgress.status !== "paused")) return;
+    const completed = completeDecisionSession(
+      recordDecisionEvent(inProgress, "candidate_view", { candidateId: restaurant.id }),
+      { restaurantId: restaurant.id, dishId: dish?.dishId },
+    );
 
     const seconds = successfulDecisionSeconds(completed) ?? undefined;
     const entry: HistoryEntry = {
@@ -233,12 +311,16 @@ export default function V15Client() {
       createdAt: new Date().toISOString(),
       decisionSeconds: seconds,
       candidateCount: completed.candidateIds.length || undefined,
+      dishId: dish?.dishId,
+      dishName: dish?.name,
     };
 
     setDecisionSessions((current) => [completed, ...current].slice(0, 500));
     setHistory((current) => [entry, ...current].slice(0, 200));
-    setActiveDecision(null);
+    updateActive(null);
+    setFoodDatabase((current) => ({ ...current, visited: [...new Set([...current.visited, restaurant.id])] }));
     setSelected(restaurant);
+    setSelectedDish(dish ?? null);
     setView("go");
   }
 
@@ -249,6 +331,9 @@ export default function V15Client() {
   }
 
   function toggleCompare(id: string) {
+    eventInSession("compare_change");
+    if (activeDecisionRef.current?.mode === "compare" && !compare.includes(id) && !activeDecisionRef.current.candidateIds.length)
+      eventInSession("candidate_view", id);
     setCompare((current) => {
       if (current.includes(id)) return current.filter((item) => item !== id);
       if (current.length >= 5) return current;
@@ -257,9 +342,7 @@ export default function V15Client() {
   }
 
   function excludeRestaurant(id: string) {
-    if (activeDecision) {
-      setActiveDecision(recordDecisionEvent(activeDecision, "exclude_permanent", { candidateId: id }));
-    }
+    eventInSession("exclude_permanent", id);
     setProfile((current) => ({
       ...current,
       excludedRestaurantIds: [...new Set([...current.excludedRestaurantIds, id])],
@@ -281,24 +364,26 @@ export default function V15Client() {
 
   function spin() {
     if (spinning || !roulettePool.length) return;
-    if (activeDecision && rouletteWinner) {
-      setActiveDecision(recordDecisionEvent(activeDecision, "reroll"));
-    }
+    if (rouletteWinner) eventInSession("reroll");
     setSpinning(true);
     setRouletteWinner(null);
     window.setTimeout(() => {
       const winner = weightedPick(roulettePool, profile) || roulettePool[0];
       setRouletteWinner(winner);
+      eventInSession("candidate_view", winner.id);
       setSpinning(false);
     }, 1800);
   }
 
   function openDetail(restaurant: Restaurant, source: HistoryEntry["source"]) {
-    const base = activeDecision ?? createDecisionSession(source);
-    let next = recordDecisionEvent(base, "candidate_view", { candidateId: restaurant.id });
-    next = recordDecisionEvent(next, "restaurant_detail_view");
-    setActiveDecision(next);
+    const base = activeDecisionRef.current;
+    if (base) {
+      let next = recordDecisionEvent(base, "candidate_view", { candidateId: restaurant.id });
+      next = recordDecisionEvent(next, "restaurant_detail_view");
+      updateActive(next);
+    }
     setSelected(restaurant);
+    setSelectedDish(null);
     setSelectedSource(source);
     setView("detail");
   }
@@ -308,20 +393,16 @@ export default function V15Client() {
       setCompareNotice("請先貼上 Google Maps 網址或輸入餐廳名稱。");
       return;
     }
-    const text = decodeURIComponent(raw).replace(/\+/g, " ");
+    const input = parseGoogleMapsInput(raw);
+    if (input.kind === "unsupported" || input.kind === "shortLink" || input.kind === "placeId") {
+      setCompareNotice(input.kind === "shortLink" ? "短網址需經伺服器解析；目前未啟用即時資料，請先輸入店名。" :
+        input.kind === "placeId" ? "已辨識 Place ID；即時資料尚未啟用，無法憑 ID 假造餐廳資料。" : "無法辨識網址，請輸入店名或 Google Maps 網址。");
+      return;
+    }
+    const text = input.value;
     let matched = DEMO_RESTAURANTS.find(
       (restaurant) => text.includes(restaurant.name) || restaurant.name.includes(text.trim()),
     );
-
-    if (!matched) {
-      const match = text.match(/\/place\/([^/]+)/i);
-      const place = match?.[1]?.replace(/\+/g, " ");
-      if (place) {
-        matched = DEMO_RESTAURANTS.find(
-          (restaurant) => place.includes(restaurant.name) || restaurant.name.includes(place),
-        );
-      }
-    }
 
     if (matched) {
       if (!compare.includes(matched.id)) toggleCompare(matched.id);
@@ -335,21 +416,32 @@ export default function V15Client() {
   }
 
   function goHome() {
-    if (activeDecision && (activeDecision.status === "active" || activeDecision.status === "paused")) {
-      const abandoned = abandonDecisionSession(activeDecision);
+    const currentDecision = activeDecisionRef.current;
+    if (currentDecision && (currentDecision.status === "active" || currentDecision.status === "paused")) {
+      const abandoned = abandonDecisionSession(currentDecision);
       setDecisionSessions((current) => [abandoned, ...current].slice(0, 500));
-      setActiveDecision(null);
+      updateActive(null);
     }
     setView("home");
+  }
+
+  function leaveTo(next: ViewId) {
+    const current = activeDecisionRef.current;
+    if (current) {
+      setDecisionSessions((items) => [abandonDecisionSession(current), ...items].slice(0, 500));
+      updateActive(null);
+    }
+    setView(next);
   }
 
   function resetProfile() {
     setProfile(DEFAULT_PROFILE);
     setFavorites([]);
+    setFoodDatabase(EMPTY_DATABASE);
     setCompare([]);
     setHistory([]);
     setDecisionSessions([]);
-    setActiveDecision(null);
+    updateActive(null);
     setOnboardingStep(0);
     setView("home");
   }
@@ -381,7 +473,7 @@ export default function V15Client() {
         <div className="brandMini">今天吃什麼？</div>
       )}
       <div className="topTitle">{title}</div>
-      <button className="iconBtn" onClick={() => setView("settings")} aria-label="設定">
+      <button className="iconBtn" onClick={() => leaveTo("settings")} aria-label="設定">
         ⚙
       </button>
     </header>
@@ -514,8 +606,15 @@ export default function V15Client() {
             <Header title="不知道吃什麼" />
             <section className="rouletteHero">
               <p className="eyebrow">LUCKY PICK</p>
-              <h1>真的讓它轉一輪。</h1>
+              <h1>{rouletteCuisine ? "這一類，選哪一家？" : "先選料理，再選餐廳與餐點。"}</h1>
               <p className="muted">候選只來自你的距離、預算、評分與排除清單。</p>
+              <div className="horizontalChips" aria-label="選擇料理類型">
+                <button className={!rouletteCuisine ? "selected" : ""} onClick={() => chooseCuisine(null)}>還不知道</button>
+                {[...new Set(eligible.map((restaurant) => restaurant.cuisine))].map((cuisine) => (
+                  <button key={cuisine} className={rouletteCuisine === cuisine ? "selected" : ""} onClick={() => chooseCuisine(cuisine)}>{cuisine}</button>
+                ))}
+              </div>
+              {!rouletteCuisine && <p className="micro">第一階段：從可用料理中隨機選一類；第二階段再抽店家與餐點。</p>}
               <div className={"slotMachine visual " + (spinning ? "spinning" : "")}>
                 <div className="reelWindow">
                   {(spinning
@@ -535,9 +634,14 @@ export default function V15Client() {
               <button
                 className="spinBtn"
                 disabled={!roulettePool.length || spinning}
-                onClick={spin}
+                onClick={() => {
+                  if (!rouletteCuisine) {
+                    const cuisines = [...new Set(roulettePool.map((item) => item.cuisine))];
+                    if (cuisines.length) chooseCuisine(cuisines[Math.floor(Math.random() * cuisines.length)]);
+                  } else spin();
+                }}
               >
-                {spinning ? "轉動中…" : "🎰 幫我選一個"}
+                {spinning ? "轉動中…" : rouletteCuisine ? "抽餐廳與餐點" : "先抽料理"}
               </button>
             </section>
 
@@ -556,20 +660,18 @@ export default function V15Client() {
                   <Mascot id={profile.mascot} mood="celebrate" size={72} />
                 </div>
                 <p className="muted">{recommendationHint(rouletteWinner, profile)}</p>
+                <p>推薦餐點：{dishesFor(rouletteWinner)[0]?.name || "尚無可信餐點資料"} <small>（{rouletteWinner.sourceLabel}）</small></p>
                 <div className="winnerActions">
                   <button className="primaryMini" onClick={() => openDetail(rouletteWinner, "roulette")}>
                     看詳細資料
                   </button>
-                  <button onClick={() => recordDecision(rouletteWinner, "roulette")}>就吃這家</button>
+                  <button onClick={() => recordDecision(rouletteWinner, "roulette")}>今天就吃這家</button>
+                  {dishesFor(rouletteWinner)[0] && <button onClick={() => recordDecision(rouletteWinner, "roulette", dishesFor(rouletteWinner)[0])}>就吃這個餐點</button>}
+                  <button onClick={spin}>再抽一次</button>
+                  <button onClick={() => toggleFavorite(rouletteWinner.id)}>{favorites.includes(rouletteWinner.id) ? "取消收藏" : "收藏"}</button>
                   <button
                     onClick={() => {
-                      if (activeDecision) {
-                        setActiveDecision(
-                          recordDecisionEvent(activeDecision, "skip_once", {
-                            candidateId: rouletteWinner.id,
-                          }),
-                        );
-                      }
+                      eventInSession("skip_once", rouletteWinner.id);
                       setSkipIds((current) => [...new Set([...current, rouletteWinner.id])]);
                       setRouletteWinner(null);
                     }}
@@ -610,6 +712,10 @@ export default function V15Client() {
                 <button className="secondaryBtn" onClick={locate}>
                   📍 {location ? "重新定位" : "取得目前位置"}
                 </button>
+                <div className="compareInputRow">
+                  <input aria-label="手動輸入區域" placeholder="手動輸入區域，例如板橋站" value={manualArea} onChange={(event) => setManualArea(event.target.value)} />
+                  <button onClick={() => { if (manualArea.trim()) { setLocation(null); setLocationStatus(`手動區域：${manualArea.trim()}（未定位；列表仍為 Demo）`); eventInSession("filter_change"); } }}>改位置</button>
+                </div>
               </div>
             </section>
 
@@ -619,19 +725,31 @@ export default function V15Client() {
               連線後，地址、距離、評分、照片與營業狀態會改為即時資料。
             </p>
 
-            <section className="restaurantList">
+            <div className="periodTabs" role="group" aria-label="地圖或列表">
+              <button className={nearbyMode === "list" ? "selected" : ""} onClick={() => setNearbyMode("list")}>列表</button>
+              <button className={nearbyMode === "map" ? "selected" : ""} onClick={() => setNearbyMode("map")}>地圖</button>
+            </div>
+            {nearbyMode === "map" && <section className="detailCard">
+              <h2>周邊地圖</h2>
+              {location ? <iframe title="目前位置地圖" loading="lazy" style={{ width: "100%", height: 280, border: 0, borderRadius: 12 }}
+                src={`https://www.openstreetmap.org/export/embed.html?bbox=${location.lng - 0.012}%2C${location.lat - 0.008}%2C${location.lng + 0.012}%2C${location.lat + 0.008}&layer=mapnik&marker=${location.lat}%2C${location.lng}`} /> : <p>先取得 GPS，才可顯示所在地圖。手動區域可用下方連結外開搜尋。</p>}
+              <p className="micro">地圖只標示你的位置；Demo 餐廳沒有真實座標，因此不放置虛構圖釘。</p>
+              <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((manualArea.trim() || location?.label || "附近") + " 餐廳")}`} target="_blank" rel="noreferrer">在 Google Maps 搜尋真實餐廳</a>
+            </section>}
+            {nearbyMode === "list" && <section className="restaurantList">
               {eligible.map((restaurant) => (
                 <RestaurantCard
                   key={restaurant.id}
                   restaurant={restaurant}
                   favorite={favorites.includes(restaurant.id)}
                   compared={compare.includes(restaurant.id)}
+                  hint={recommendationHint(restaurant, profile)}
                   onFavorite={() => toggleFavorite(restaurant.id)}
                   onCompare={() => toggleCompare(restaurant.id)}
                   onOpen={() => openDetail(restaurant, "nearby")}
                 />
               ))}
-            </section>
+            </section>}
           </>
         )}
 
@@ -705,6 +823,18 @@ export default function V15Client() {
               </section>
             )}
 
+            {compareWinner && <section className="insightCard">
+              <p className="eyebrow">RECOMMENDED WINNER · DEMO</p>
+              <h2>目前較符合：{compareWinner.name}</h2>
+              <p>{[
+                ...recommendationHint(compareWinner, profile).split(" · "),
+                `評分 ${compareWinner.rating}／5`,
+                `步行約 ${compareWinner.walk} 分鐘（Demo）`,
+              ].slice(0, 3).join("；")}</p>
+              <p className="micro">依個人偏好與 Demo 條件排序，非即時資料或 AI 審核結論。</p>
+              <button className="primaryBtn" onClick={() => recordDecision(compareWinner, "compare")}>今天就吃這家</button>
+            </section>}
+
             <section className="sectionBlock">
               <div className="sectionHeading">
                 <h2>也可以直接加餐廳</h2>
@@ -737,7 +867,7 @@ export default function V15Client() {
               <input
                 className="textInput"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => { setSearch(event.target.value); eventInSession("filter_change"); }}
                 placeholder="搜尋店名、料理或餐點"
               />
               <div className="horizontalChips">
@@ -745,7 +875,7 @@ export default function V15Client() {
                   <button
                     key={cuisine}
                     className={selectedCuisine === cuisine ? "selected" : ""}
-                    onClick={() => setSelectedCuisine(cuisine)}
+                    onClick={() => { setSelectedCuisine(cuisine); eventInSession("filter_change"); }}
                   >
                     {cuisine}
                   </button>
@@ -765,6 +895,7 @@ export default function V15Client() {
                 />
               ))}
             </section>
+            {!categoryResults.length && <Empty text="沒有符合目前條件的餐廳，請調整首頁篩選或搜尋字詞。" />}
           </>
         )}
 
@@ -775,13 +906,18 @@ export default function V15Client() {
               <p className="eyebrow">SAVED</p>
               <h2>下次想吃，不必再找一次</h2>
             </section>
+            <div className="periodTabs" role="group" aria-label="收藏分類">
+              {(["favorites", "toTry", "visited"] as const).map((tab) => <button key={tab} className={savedTab === tab ? "selected" : ""} onClick={() => setSavedTab(tab)}>
+                {tab === "favorites" ? "收藏" : tab === "toTry" ? "想吃" : "吃過"}
+              </button>)}
+            </div>
             <section className="restaurantList">
-              {DEMO_RESTAURANTS.filter((restaurant) => favorites.includes(restaurant.id)).map(
+              {DEMO_RESTAURANTS.filter((restaurant) => (savedTab === "favorites" ? favorites : foodDatabase[savedTab]).includes(restaurant.id)).map(
                 (restaurant) => (
                   <RestaurantCard
                     key={restaurant.id}
                     restaurant={restaurant}
-                    favorite
+                    favorite={favorites.includes(restaurant.id)}
                     compared={compare.includes(restaurant.id)}
                     onFavorite={() => toggleFavorite(restaurant.id)}
                     onCompare={() => toggleCompare(restaurant.id)}
@@ -790,7 +926,15 @@ export default function V15Client() {
                 ),
               )}
             </section>
-            {!favorites.length && <Empty text="看到想再吃的店，就按一下愛心。" />}
+            {!(savedTab === "favorites" ? favorites : foodDatabase[savedTab]).length && <Empty text="目前沒有這一類的餐廳；可在詳細頁標記。" />}
+            <section className="detailCard">
+              <h2>我的清單</h2>
+              <div className="compareInputRow">
+                <input aria-label="新清單名稱" placeholder="例如：下次約會" value={newListName} onChange={(event) => setNewListName(event.target.value)} />
+                <button onClick={() => { const name = newListName.trim(); if (name && !foodDatabase.lists[name]) { setFoodDatabase((current) => ({ ...current, lists: { ...current.lists, [name]: [] } })); setNewListName(""); } }}>建立</button>
+              </div>
+              {Object.entries(foodDatabase.lists).map(([name, ids]) => <p key={name}><b>{name}</b>：{ids.map((id) => DEMO_RESTAURANTS.find((item) => item.id === id)?.name || id).join("、") || "尚未加入餐廳"}</p>)}
+            </section>
           </>
         )}
 
@@ -818,6 +962,8 @@ export default function V15Client() {
               <StatCard value={formatDecisionDuration(decisionStats.averageActiveSeconds)} label="平均主動決策時間" />
               <StatCard value={formatDecisionDuration(decisionStats.medianActiveSeconds)} label="中位數決策時間" />
               <StatCard value={String(decisionStats.slowDecisions)} label="超過 10 分鐘" />
+              <StatCard value={`${decisionStats.firstChoiceAcceptanceRate}%`} label="首選接受率" />
+              <StatCard value={`${decisionStats.abandonmentRate}%`} label="未完成率" />
             </section>
 
             <section className="insightCard">
@@ -846,6 +992,41 @@ export default function V15Client() {
               <button className="secondaryBtn" onClick={() => setView("history")}>
                 查看詳細紀錄
               </button>
+            </section>
+
+            <section className="chartCard">
+              <div className="sectionHeading"><h2>常吃 Top 3</h2></div>
+              {([
+                ["cuisine", "料理", stats.cuisineCounts],
+                ["restaurant", "餐廳", stats.restaurantCounts],
+                ["dish", "餐點", stats.dishCounts],
+              ] as const).map(([type, title, rows]) => <div key={type}>
+                <h3>{title}</h3>
+                {rows.length ? rows.slice(0, 3).map((item, index) => <button className="rankingRow" key={item.label} onClick={() => setStatsDrilldown({ type, label: item.label })}>
+                  {index + 1}. {item.label}　{item.value} 次 →
+                </button>) : <p className="micro">尚無資料</p>}
+              </div>)}
+              {statsDrilldown && <div className="detailCard">
+                <button onClick={() => setStatsDrilldown(null)}>關閉詳細</button>
+                <h3>{statsDrilldown.label}</h3>
+                {(() => {
+                  const field = statsDrilldown.type === "cuisine" ? "cuisine" : statsDrilldown.type === "restaurant" ? "restaurantName" : "dishName";
+                  const matches = filterHistoryByPeriod(history, statsPeriod).filter((entry) => entry[field] === statsDrilldown.label);
+                  const total = filterHistoryByPeriod(history, statsPeriod).length;
+                  return <><p>{matches.length} 次 · 佔完成決策 {total ? Math.round(matches.length / total * 100) : 0}%</p>
+                    <p>最近一次：{matches[0] ? new Date(matches[0].createdAt).toLocaleDateString("zh-TW") : "尚無"}</p>
+                    {statsDrilldown.type === "cuisine" && <p>常吃餐廳：{[...new Set(matches.map((item) => item.restaurantName))].slice(0, 3).join("、")}</p>}
+                    {statsDrilldown.type !== "dish" && <p>常吃餐點：{[...new Set(matches.map((item) => item.dishName).filter(Boolean))].slice(0, 3).join("、") || "尚未記錄"}</p>}</>;
+                })()}
+              </div>}
+            </section>
+
+            <section className="chartCard">
+              <h2>決策過程</h2>
+              <p>平均總經過 {formatDecisionDuration(decisionStats.averageElapsedSeconds)} · 最快主動決策 {decisionStats.fastestActiveSeconds === null ? "尚無資料" : formatDecisionDuration(decisionStats.fastestActiveSeconds)}</p>
+              <p>超過 5 分 {decisionStats.overFiveMinutes} 次 · 超過 10 分 {decisionStats.overTenMinutes} 次 · 平均看過 {decisionStats.averageCandidates} 家</p>
+              <p>餐廳詳情 {decisionStats.restaurantDetailViews} 次 · 餐點詳情 {decisionStats.dishDetailViews} 次 · 篩選變更 {decisionStats.filterChanges} 次</p>
+              <p>重抽 {decisionStats.rerolls} 次 · 這次不要 {decisionStats.skips} 次 · 永久排除 {decisionStats.permanentExclusions} 次</p>
             </section>
 
             <section className="chartCard">
@@ -952,21 +1133,41 @@ export default function V15Client() {
                 {selected.menuUrl && (
                   <a href={selected.menuUrl} target="_blank" rel="noreferrer">官方菜單</a>
                 )}
+                {selected.websiteUrl && <a href={selected.websiteUrl} target="_blank" rel="noreferrer">網站</a>}
+                {!selected.menuUrl && <span>菜單來源待接入</span>}
+                <span>訂位資訊尚無可信來源</span>
               </div>
+            </section>
+
+            <section className="detailCard">
+              <p className="eyebrow">WHY THIS PLACE</p>
+              <h2>為什麼推薦</h2>
+              <p>偏好排序分數 {Math.round(scoreRestaurant(selected, profile).score)}（僅用於 Demo 排序，非評分百分比）</p>
+              <p><b>可查資料 · Demo：</b>{selected.cuisine}、評分 {selected.rating}、步行 {selected.walk} 分、{restaurantOpenState(selected, new Date(clock)).label}。</p>
+              <p><b>個人偏好：</b>{profile.favoriteCuisines.includes(selected.cuisine) ? `你選過喜歡 ${selected.cuisine}` : "未設定這類料理偏好"}。</p>
+              <p><b>推論：</b>{recommendationHint(selected, profile)}；來自偏好規則，並非已查證的店家優點。</p>
+              <p><b>可能顧慮：</b>{selected.review} <small>（{selected.sourceLabel}）</small></p>
+              <p className="micro">衛生與常見負評尚無可核實訊號；不以 AI 摘要冒充事實。</p>
             </section>
 
             <section className="detailCard">
               <p className="eyebrow">FIRST VISIT</p>
               <h2>第一次來，可以先這樣點</h2>
               <div className="menuGrid">
-                {selected.menuItems.map((item) => (
-                  <article key={item.name}>
-                    <b>{item.name}</b>
-                    <span>{item.price ? "NT$ " + String(item.price) : "價格待官方來源"}</span>
-                    <small>{item.source === "demo" ? "Demo 菜單資料" : "可信來源"}</small>
+                {dishesFor(selected).map((dish) => (
+                  <article key={dish.dishId}>
+                    <button onClick={() => { setSelectedDish(dish); eventInSession("dish_detail_view"); }}><b>{dish.name}</b> · 看餐點</button>
+                    <span>{dish.price !== undefined ? `NT$ ${dish.price}（${dish.source === "demo" ? "Demo 測試價" : "來源：" + dish.source}）` : "價格尚無可信來源"}</span>
+                    <small>資料：{dish.source === "demo" ? "Demo 測試資料" : dish.source} · {dish.sourceFreshness}</small>
                   </article>
                 ))}
               </div>
+              {selectedDish && selectedDish.restaurantId === selected.id && <div className="detailCard">
+                <h3>{selectedDish.name}</h3>
+                <p>{selectedDish.recommendationEvidence.join("；")}</p>
+                <p className="micro">餐點照片與熱門程度尚無可信來源。</p>
+                <button className="primaryMini" onClick={() => recordDecision(selected, selectedSource, selectedDish)}>就吃這個餐點</button>
+              </div>}
             </section>
 
             <section className="detailCard">
@@ -983,10 +1184,22 @@ export default function V15Client() {
               <button onClick={() => toggleCompare(selected.id)}>
                 {compare.includes(selected.id) ? "✓ 已加入比較" : "＋ 加入比較"}
               </button>
+              <button onClick={() => toggleTry(selected.id)}>{foodDatabase.toTry.includes(selected.id) ? "✓ 想吃" : "＋ 想吃"}</button>
               <button className="dangerSoft" onClick={() => excludeRestaurant(selected.id)}>
                 不喜歡這家
               </button>
             </div>
+
+            <section className="detailCard">
+              <h2>我的記錄</h2>
+              <label htmlFor="private-note">私人筆記</label>
+              <textarea id="private-note" className="textInput" value={foodDatabase.notes[selected.id] || ""} onChange={(event) => setFoodDatabase((current) => ({ ...current, notes: { ...current.notes, [selected.id]: event.target.value } }))} placeholder="只保存在此裝置" />
+              <div className="compareInputRow"><input aria-label="新增自訂標籤" placeholder="自訂標籤" value={newTag} onChange={(event) => setNewTag(event.target.value)} />
+                <button onClick={() => { if (newTag.trim()) { setFoodDatabase((current) => ({ ...current, tags: { ...current.tags, [selected.id]: [...new Set([...(current.tags[selected.id] || []), newTag.trim()])] } })); setNewTag(""); } }}>加入</button></div>
+              <p>{(foodDatabase.tags[selected.id] || []).map((tag) => <button key={tag} onClick={() => setFoodDatabase((current) => ({ ...current, tags: { ...current.tags, [selected.id]: current.tags[selected.id].filter((item) => item !== tag) } }))}>#{tag} ×</button>)}</p>
+              {Object.keys(foodDatabase.lists).map((name) => <button key={name} onClick={() => setFoodDatabase((current) => ({ ...current, lists: { ...current.lists, [name]: toggleValue(current.lists[name], selected.id) } }))}>
+                {foodDatabase.lists[name].includes(selected.id) ? "✓" : "＋"} {name}</button>)}
+            </section>
 
             <button className="primaryBtn" onClick={() => recordDecision(selected)}>
               今天就吃這家
@@ -1007,7 +1220,7 @@ export default function V15Client() {
             <section className="detailCard">
               <h2>出發前再看一次</h2>
               <div className="goSummary">
-                <div><span>推薦點法</span><b>{selected.signature.slice(0, 2).join("＋")}</b></div>
+                <div><span>本次餐點</span><b>{selectedDish?.name || "尚未指定；可參考 Demo 餐點"}</b></div>
                 <div><span>預算</span><b>{moneyText(selected.priceMin, selected.priceMax)}</b></div>
                 <div><span>地址</span><b>{selected.address}</b></div>
               </div>
@@ -1148,13 +1361,13 @@ export default function V15Client() {
           <button className={view === "home" ? "active" : ""} onClick={goHome}>
             <span className="navIcon">⌂</span><span>首頁</span>
           </button>
-          <button className={view === "favorites" ? "active" : ""} onClick={() => setView("favorites")}>
+          <button className={view === "favorites" ? "active" : ""} onClick={() => leaveTo("favorites")}>
             <span className="navIcon">♡</span><span>收藏</span>
           </button>
-          <button className={view === "stats" || view === "history" ? "active" : ""} onClick={() => setView("stats")}>
+          <button className={view === "stats" || view === "history" ? "active" : ""} onClick={() => leaveTo("stats")}>
             <span className="navIcon">▥</span><span>統計</span>
           </button>
-          <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>
+          <button className={view === "settings" ? "active" : ""} onClick={() => leaveTo("settings")}>
             <span className="navIcon">◎</span><span>我的</span>
           </button>
         </nav>
@@ -1429,7 +1642,7 @@ function RestaurantCard({
           <span className={open.open ? "good" : "bad"}>{open.open ? "營業中" : "休息"}</span>
         </div>
         <p>★ {restaurant.rating}（{restaurant.reviewCount.toLocaleString()}） · {restaurant.cuisine}</p>
-        <p>🚶 {restaurant.walk} 分 · {moneyText(restaurant.priceMin, restaurant.priceMax)}</p>
+        <p>🚶 {restaurant.walk} 分 · {restaurant.distance}m · {moneyText(restaurant.priceMin, restaurant.priceMax)}</p>
         {hint && <p className="matchHint">✨ {hint}</p>}
         <small className="demoMark">{restaurant.sourceLabel}</small>
       </button>

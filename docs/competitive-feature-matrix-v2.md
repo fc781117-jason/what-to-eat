@@ -5,6 +5,46 @@ Purpose: establish the market baseline before final visual design.
 
 ## 1. Benchmark products
 
+Checked 2026-10-05 against first-party product/help pages. A checkmark below means that the official product describes the capability; a blank cell is not a claim that a competitor lacks it.
+
+| Product / official evidence | Discover / filter | Save / notes | Decide / act | Lesson for V2 |
+|---|---|---|---|---|
+| [Resy Discover](https://blog.resy.com/newsroom/resy-launches-discover-tab/) · [Lists](https://blog.resy.com/newsroom/resy-launches-shareable-lists/) | curated lists, context | shareable lists | reservation, Notify | discovery should lead to an action |
+| [Tabelog app](https://tabelog.com/appli_campaign) | map, name, available seat | saved lists, notes | reservation | photos/reviews and actual availability reduce uncertainty |
+| [Rakuten Gurunavi](https://gurunavi.com/en/all) | area, cuisine, restaurant | — | booking and course | show decision facts before booking |
+| [Tripadvisor My Trips](https://no.tripadvisor.com/pages/savesfaq.html) | restaurants and trips | trip saves | trip planning | organize saved places by context |
+| [EZTABLE](https://www.eztable.com/app/?locale=en_US) | restaurant and reviews | — | reservation, rewards | Taiwan booking action is a distinct provider boundary |
+| [愛食記](https://www.ifoodie.tw/) | local discovery and reviews | food collection | restaurant exploration | localized discovery and collection matter |
+| [MICHELIN Guide](https://guide.michelin.com/us/en/article/news-and-views/michelin-guide-app-features) | curated places | favorites, visited, lists, notes | feedback / share | personal database must survive a single decision |
+| [Yelp partner docs](https://docs.developer.yelp.com/docs/overview-1) | — | — | partner waitlist | waitlist requires provider integration; public consumer pages unavailable during this review |
+
+These expand the original Beli, Google Maps, Mapstr, OpenTable, TheFork and HappyCow baseline below. We did not infer that any listed service offers What To Eat?'s timed decision session.
+
+## 1a. Market baseline → V2 implementation
+
+| Capability | Market pattern | Current V2 | Remaining gate |
+|---|---|---|---|
+| Four decision entrances | discovery, nearby, context | functional | live data |
+| Map / list | Tabelog, Google Maps | GPS map of user location + separate Demo list | licensed Google Map with live place pins |
+| Rich detail and action | Google Maps, Gurunavi, EZTABLE | Demo detail, call/map/menu when sourced | Places photos, real fields, booking partner |
+| Personal database | Resy, MICHELIN, Mapstr | favorites, to try, visited, tags, private notes, lists; local only | cloud sync, import |
+| Compare 2–5 | evidence from multiple providers | swipe cards and preference winner on Demo | live search, URL resolver, confidence |
+| Restaurant + dish | menus and dish photos | typed dishes and explicit dish confirmation; Demo menu only | trusted menu/photos and price provenance |
+| Decision measurement | What To Eat? distinction | active vs elapsed, abandon, candidate/event counts | cross-device continuity |
+| Post-decision action | booking, navigation | navigation, call if present | live booking / availability |
+
+## 1b. Missing feature backlog
+
+| Priority | Feature | Acceptance evidence | Dependency |
+|---|---|---|---|
+| P0 | Google Places nearby/detail/photos + Google map attribution | real restaurants, source/freshness, non-fabricated fields | cost approval, keys, quota and policy review |
+| P0 | Reverse Geocoding and walking Routes | actual address and walking duration labeled by source | same cost gate |
+| P1 | URL resolver and text search | known Place ID, long and short URLs resolve; ambiguous links rejected | guarded server proxy and quota |
+| P1 | Menu/dish ingestion | source, freshness, menu photo and price evidence for each item | licensed restaurant/provider data |
+| P1 | Cloud persistence and import | saved records survive a new device; Google list import only with permission | auth, database, import API terms |
+| P2 | Booking, offers, waitlist | deep link or integration from verified provider | commercial partnership |
+| P2 | Social sharing and offline saved places | links and offline access under source rights | permissions and content licenses |
+
 | Product | Strength to learn from | What To Eat? adoption |
 |---|---|---|
 | Beli | ranked restaurant lists, want-to-try / tried organization, tags, notes, favorite dishes, Taste Profile, personalized recommendations | Taste Profile, favorite dishes, restaurant ranking, user preference learning |

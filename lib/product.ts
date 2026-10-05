@@ -15,7 +15,23 @@ export type ViewId =
   | "detail"
   | "go";
 
-export type DataSourceKind = "demo" | "google" | "official" | "ai-estimate";
+export type DataSourceKind = "demo" | "google" | "official" | "booking" | "user" | "ai-summary" | "ai-estimate";
+
+export type Dish = {
+  dishId: string;
+  restaurantId: string;
+  name: string;
+  category: string;
+  price?: number;
+  photo?: string;
+  popularity?: number;
+  source: DataSourceKind;
+  sourceFreshness?: string;
+  likes: number;
+  dislikes: number;
+  selectionCount: number;
+  recommendationEvidence: string[];
+};
 
 export type MenuItem = {
   name: string;
@@ -80,6 +96,8 @@ export type HistoryEntry = {
   createdAt: string;
   decisionSeconds?: number;
   candidateCount?: number;
+  dishId?: string;
+  dishName?: string;
 };
 
 export type DecisionSession = {
