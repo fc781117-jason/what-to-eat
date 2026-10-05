@@ -1,4 +1,4 @@
-name: Publish Test Preview
+name: Verify Vercel Preview
 
 on:
   push:
@@ -7,11 +7,8 @@ on:
       - feature/v2-functional-ux
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
-  group: what-to-eat-static-preview
+  group: what-to-eat-vercel-preview
   cancel-in-progress: true
 
 jobs:
@@ -30,23 +27,5 @@ jobs:
       - name: Functional tests
         run: npm test
 
-      - name: Build static preview
+      - name: Build Vercel-compatible app
         run: npm run build
-        env:
-          STATIC_EXPORT: "true"
-          NEXT_PUBLIC_BASE_PATH: /fc781117-jason/what-to-eat/preview-static
-
-      - name: Publish preview branch
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cd out
-          touch .nojekyll
-          git init
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "preview: ${GITHUB_SHA}"
-          git branch -M preview-static
-          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force origin preview-static

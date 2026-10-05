@@ -8,6 +8,7 @@ import { buildDecisionBehaviorStats, buildFoodStats } from '../lib/analytics.ts'
 import { parseGoogleMapsInput, dishesFor } from '../lib/functional-data.ts';
 import { DEMO_RESTAURANTS } from '../lib/product.ts';
 import { matchesRestaurantSearch } from '../lib/recommendation.ts';
+import { googlePlaceToRestaurant } from '../lib/google-places.ts';
 
 test('active clock pauses in background and abandoned time does not affect successful average', () => {
   let first = createDecisionSession('roulette', 1000);
@@ -77,4 +78,31 @@ test('natural food search combines cuisine, context, budget and late-night inten
   assert.equal(matchesRestaurantSearch(curry, '約會 150 元內'), false);
   assert.equal(matchesRestaurantSearch(skewers, '日式 宵夜 約會 1000元內'), true);
   assert.equal(matchesRestaurantSearch(noodles, '宵夜'), false);
+});
+
+test('Google Places mapping preserves real fields without inventing menu data', () => {
+  const restaurant = googlePlaceToRestaurant({
+    id: 'ChIJ-real-place',
+    displayName: { text: '真實餐廳' },
+    formattedAddress: '台北市中正區測試路 1 號',
+    location: { latitude: 25.0478, longitude: 121.517 },
+    rating: 4.6,
+    userRatingCount: 321,
+    priceLevel: 'PRICE_LEVEL_MODERATE',
+    googleMapsUri: 'https://maps.google.com/?cid=1',
+    primaryTypeDisplayName: { text: '日本料理' },
+  }, { lat: 25.047, lng: 121.517 });
+  assert.ok(restaurant);
+  assert.equal(restaurant.source, 'google');
+  assert.equal(restaurant.sourceLabel, 'Google Places');
+  assert.equal(restaurant.priceLevelLabel, '$$');
+  assert.ok(restaurant.distance > 0);
+  assert.deepEqual(restaurant.menuItems, []);
+  assert.deepEqual(restaurant.signature, []);
+});
+
+test('budget intent excludes live places when Google has no reliable numeric spend', () => {
+  const restaurant = googlePlaceToRestaurant({ id: 'x', displayName: { text: '未知價位店' } });
+  assert.ok(restaurant);
+  assert.equal(matchesRestaurantSearch(restaurant, '每人 300 元內'), false);
 });

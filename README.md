@@ -24,7 +24,7 @@ Themes are never automatically mixed. Mascot selection is independent and suppor
 ### Main modes
 - 不知道吃什麼
 - 附近有什麼
-- 幫我選
+- 餐廳超級比一比
 - 想吃這一類
 - 收藏
 - 選餐紀錄
@@ -38,14 +38,15 @@ This repository currently includes:
 - PWA manifest + service worker
 - Local persistence for profile, favorites, comparisons, and decision history
 - Migration from the earlier V0.1 theme/profile shape
-- Demo restaurant data
+- Server-only Google Places (New) search adapter with an explicit enable flag and request rate limit
+- No runtime fallback to Demo restaurants; missing integrations are shown as unavailable
 - GitHub Actions build verification
-- GitHub Pages manual preview workflow
+- Vercel-compatible dynamic API route
 
 ## Integration gates
 
 Live integrations are intentionally separated from the UI so they can be connected without rewriting the experience:
-- Google Places / Maps
+- Google Places / Maps: set `GOOGLE_PLACES_API_KEY`, then set `GOOGLE_PLACES_LIVE_ENABLED=true`. Keep `GOOGLE_PLACES_FIELD_TIER=pro` unless the opening-hours field tier has been approved.
 - Supabase Auth (Google / Apple / Email)
 - Supabase cloud sync
 

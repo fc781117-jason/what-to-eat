@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const requestedBasePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-const shouldExport = process.env.STATIC_EXPORT === "true" || process.env.GITHUB_ACTIONS === "true";
+const shouldExport = process.env.STATIC_EXPORT === "true";
 
 const nextConfig = {
   reactStrictMode: true,

@@ -28,6 +28,7 @@ export function matchesRestaurantSearch(restaurant: Restaurant, rawQuery: string
 
   const budgetMatch = query.match(/(?:每人)?\s*(\d{2,5})\s*(?:元|塊)?\s*(?:以?內|以下|內)/);
   if (budgetMatch) {
+    if (!restaurant.priceMin) return false;
     if (restaurant.priceMin > Number(budgetMatch[1])) return false;
     query = query.replace(budgetMatch[0], " ");
   }

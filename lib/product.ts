@@ -70,6 +70,8 @@ export type Restaurant = {
   distance: number;
   priceMin: number;
   priceMax: number;
+  priceLevelLabel?: string;
+  openNow?: boolean | null;
   address: string;
   phone?: string;
   websiteUrl?: string;
@@ -474,6 +476,12 @@ function minutesOf(text: string) {
 }
 
 export function restaurantOpenState(restaurant: Restaurant, now = new Date()) {
+  if (typeof restaurant.openNow === "boolean") {
+    return { open: restaurant.openNow, label: restaurant.openNow ? "營業中" : "目前休息" };
+  }
+  if (!Object.keys(restaurant.weeklyHours).length) {
+    return { open: true, label: "營業狀態請見 Google Maps", unknown: true };
+  }
   const day = now.getDay() as 0 | 1 | 2 | 3 | 4 | 5 | 6;
   const minute = now.getHours() * 60 + now.getMinutes();
   const intervals = restaurant.weeklyHours[day] ?? [];
@@ -502,7 +510,12 @@ export function restaurantOpenState(restaurant: Restaurant, now = new Date()) {
 }
 
 export function moneyText(min: number, max: number) {
+  if (!min && !max) return "價格請見 Google Maps";
   return `NT$ ${min}–${max}`;
+}
+
+export function restaurantPriceText(restaurant: Restaurant) {
+  return restaurant.priceLevelLabel || moneyText(restaurant.priceMin, restaurant.priceMax);
 }
 
 export function priceBandMax(id: PriceBand) {
