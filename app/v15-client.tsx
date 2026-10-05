@@ -281,8 +281,11 @@ export default function V15Client() {
   function beginDecision(source: HistoryEntry["source"], _candidates: number, nextView: ViewId) {
     const existing = activeDecisionRef.current;
     if (existing) setDecisionSessions((current) => [abandonDecisionSession(existing), ...current].slice(0, 500));
-    const session = source === "compare" && compare[0]
-      ? recordDecisionEvent(createDecisionSession(source), "candidate_view", { candidateId: compare[0] })
+    const session = source === "compare"
+      ? compare.filter((id) => !profile.excludedRestaurantIds.includes(id)).reduce(
+          (current, id) => recordDecisionEvent(current, "candidate_view", { candidateId: id }),
+          createDecisionSession(source),
+        )
       : createDecisionSession(source);
     updateActive(session);
     setSelectedSource(source);
@@ -335,8 +338,9 @@ export default function V15Client() {
   }
 
   function toggleCompare(id: string) {
+    if (!compare.includes(id) && compare.length >= 5) return;
     eventInSession("compare_change");
-    if (activeDecisionRef.current?.mode === "compare" && !compare.includes(id) && !activeDecisionRef.current.candidateIds.length)
+    if (activeDecisionRef.current?.mode === "compare" && !compare.includes(id))
       eventInSession("candidate_view", id);
     setCompare((current) => {
       if (current.includes(id)) return current.filter((item) => item !== id);
