@@ -75,6 +75,8 @@ export default function V15Client() {
   const [foodDatabase, setFoodDatabase] = useState<FoodDatabase>(EMPTY_DATABASE);
   const [savedTab, setSavedTab] = useState<"favorites" | "toTry" | "visited">("favorites");
   const [newListName, setNewListName] = useState("");
+  const [selectedListName, setSelectedListName] = useState<string | null>(null);
+  const [listNotice, setListNotice] = useState("");
   const [newTag, setNewTag] = useState("");
   const [compare, setCompare] = useState<string[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -335,6 +337,34 @@ export default function V15Client() {
 
   function toggleVisited(id: string) {
     setFoodDatabase((current) => ({ ...current, visited: toggleValue(current.visited, id) }));
+  }
+
+  function createCustomList() {
+    const name = newListName.trim().slice(0, 30);
+    if (!name) {
+      setListNotice("請先輸入清單名稱。");
+      return;
+    }
+    if (Object.hasOwn(foodDatabase.lists, name)) {
+      setListNotice("已經有同名清單。");
+      setSelectedListName(name);
+      return;
+    }
+    setFoodDatabase((current) => ({ ...current, lists: { ...current.lists, [name]: [] } }));
+    setNewListName("");
+    setSelectedListName(name);
+    setListNotice(`已建立「${name}」。可到餐廳詳情加入內容。`);
+  }
+
+  function deleteCustomList(name: string) {
+    if (!window.confirm(`確定刪除「${name}」清單？`)) return;
+    setFoodDatabase((current) => {
+      const lists = { ...current.lists };
+      delete lists[name];
+      return { ...current, lists };
+    });
+    setSelectedListName((current) => current === name ? null : current);
+    setListNotice(`已刪除「${name}」。`);
   }
 
   function toggleCompare(id: string) {
@@ -949,11 +979,36 @@ export default function V15Client() {
             <section className="detailCard">
               <h2>我的清單</h2>
               <div className="compareInputRow">
-                <input aria-label="新清單名稱" placeholder="例如：下次約會" value={newListName} onChange={(event) => setNewListName(event.target.value)} />
-                <button onClick={() => { const name = newListName.trim(); if (name && !foodDatabase.lists[name]) { setFoodDatabase((current) => ({ ...current, lists: { ...current.lists, [name]: [] } })); setNewListName(""); } }}>建立</button>
+                <input aria-label="新清單名稱" maxLength={30} placeholder="例如：下次約會" value={newListName} onChange={(event) => { setNewListName(event.target.value); setListNotice(""); }} onKeyDown={(event) => { if (event.key === "Enter") createCustomList(); }} />
+                <button onClick={createCustomList}>建立</button>
               </div>
-              {Object.entries(foodDatabase.lists).map(([name, ids]) => <p key={name}><b>{name}</b>：{ids.map((id) => DEMO_RESTAURANTS.find((item) => item.id === id)?.name || id).join("、") || "尚未加入餐廳"}</p>)}
+              {listNotice && <p className="micro" role="status">{listNotice}</p>}
+              {Object.keys(foodDatabase.lists).length ? <div className="savedLists">
+                {Object.entries(foodDatabase.lists).map(([name, ids]) => <div className={"savedListRow " + (selectedListName === name ? "selected" : "")} key={name}>
+                  <button className="savedListOpen" onClick={() => setSelectedListName((current) => current === name ? null : name)} aria-expanded={selectedListName === name}>
+                    <span><b>{name}</b><small>{ids.length} 家餐廳</small></span>
+                    <span aria-hidden="true">{selectedListName === name ? "收起" : "查看"}</span>
+                  </button>
+                  <button className="savedListDelete" onClick={() => deleteCustomList(name)} aria-label={`刪除${name}清單`}>刪除</button>
+                </div>)}
+              </div> : <p className="muted">建立情境清單後，可在餐廳詳情把店家加入清單。</p>}
             </section>
+            {selectedListName && Object.hasOwn(foodDatabase.lists, selectedListName) && <section className="sectionBlock">
+              <div className="sectionHeading"><h2>{selectedListName}</h2><span>{foodDatabase.lists[selectedListName].length} 家</span></div>
+              {foodDatabase.lists[selectedListName].length ? <div className="restaurantList">
+                {foodDatabase.lists[selectedListName].map((id) => DEMO_RESTAURANTS.find((item) => item.id === id)).filter(Boolean).map((restaurant) => <div className="savedListRestaurant" key={restaurant!.id}>
+                  <RestaurantCard
+                    restaurant={restaurant!}
+                    favorite={favorites.includes(restaurant!.id)}
+                    compared={compare.includes(restaurant!.id)}
+                    onFavorite={() => toggleFavorite(restaurant!.id)}
+                    onCompare={() => toggleCompare(restaurant!.id)}
+                    onOpen={() => openDetail(restaurant!, "category")}
+                  />
+                  <button className="dangerSoft removeFromList" onClick={() => setFoodDatabase((current) => ({ ...current, lists: { ...current.lists, [selectedListName]: current.lists[selectedListName].filter((item) => item !== restaurant!.id) } }))}>從「{selectedListName}」移除</button>
+                </div>)}
+              </div> : <Empty text="這個清單還沒有餐廳；到餐廳詳情即可加入。" />}
+            </section>}
           </>
         )}
 
