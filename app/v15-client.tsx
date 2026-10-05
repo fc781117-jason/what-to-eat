@@ -79,6 +79,7 @@ export default function V15Client() {
   const [compare, setCompare] = useState<string[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [selected, setSelected] = useState<Restaurant | null>(null);
+  const [detailReturnView, setDetailReturnView] = useState<ViewId>("home");
   const [selectedSource, setSelectedSource] = useState<HistoryEntry["source"]>("category");
   const [selectedCuisine, setSelectedCuisine] = useState("全部");
   const [search, setSearch] = useState("");
@@ -318,7 +319,6 @@ export default function V15Client() {
     setDecisionSessions((current) => [completed, ...current].slice(0, 500));
     setHistory((current) => [entry, ...current].slice(0, 200));
     updateActive(null);
-    setFoodDatabase((current) => ({ ...current, visited: [...new Set([...current.visited, restaurant.id])] }));
     setSelected(restaurant);
     setSelectedDish(dish ?? null);
     setView("go");
@@ -328,6 +328,10 @@ export default function V15Client() {
     setFavorites((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
     );
+  }
+
+  function toggleVisited(id: string) {
+    setFoodDatabase((current) => ({ ...current, visited: toggleValue(current.visited, id) }));
   }
 
   function toggleCompare(id: string) {
@@ -349,6 +353,7 @@ export default function V15Client() {
     }));
     setCompare((current) => current.filter((item) => item !== id));
     setRouletteWinner(null);
+    if (view === "detail") goBackFromDetail();
   }
 
   async function locate() {
@@ -382,6 +387,7 @@ export default function V15Client() {
     let next = recordDecisionEvent(base, "candidate_view", { candidateId: restaurant.id });
     next = recordDecisionEvent(next, "restaurant_detail_view");
     updateActive(next);
+    setDetailReturnView(view);
     setSelected(restaurant);
     setSelectedDish(null);
     setSelectedSource(source);
@@ -425,6 +431,14 @@ export default function V15Client() {
     setView("home");
   }
 
+  function goBackFromDetail() {
+    if (["roulette", "nearby", "compare", "category"].includes(detailReturnView)) {
+      setView(detailReturnView);
+    } else {
+      leaveTo(detailReturnView);
+    }
+  }
+
   function leaveTo(next: ViewId) {
     const current = activeDecisionRef.current;
     if (current) {
@@ -466,7 +480,7 @@ export default function V15Client() {
   const Header = ({ title }: { title?: string }) => (
     <header className="topbar">
       {view !== "home" ? (
-        <button className="iconBtn" onClick={goHome} aria-label="回首頁">
+        <button className="iconBtn" onClick={view === "detail" ? goBackFromDetail : goHome} aria-label={view === "detail" ? "返回上一頁" : "回首頁"}>
           ←
         </button>
       ) : (
@@ -911,6 +925,7 @@ export default function V15Client() {
                 {tab === "favorites" ? "收藏" : tab === "toTry" ? "想吃" : "吃過"}
               </button>)}
             </div>
+            {savedTab === "visited" && <p className="micro">舊版曾在選定餐廳時自動標記「吃過」；請點進餐廳確認，並可取消不正確的標記。</p>}
             <section className="restaurantList">
               {DEMO_RESTAURANTS.filter((restaurant) => (savedTab === "favorites" ? favorites : foodDatabase[savedTab]).includes(restaurant.id)).map(
                 (restaurant) => (
@@ -943,7 +958,7 @@ export default function V15Client() {
             <Header title="我的飲食統計" />
             <section className="statsHeader">
               <p className="eyebrow">FOOD HABITS</p>
-              <h1>看看你到底怎麼決定吃什麼。</h1>
+              <h1>看看你都怎麼決定吃什麼。</h1>
               <div className="periodTabs">
                 {(["week", "month", "year", "all"] as StatsPeriod[]).map((period) => (
                   <button
@@ -995,7 +1010,7 @@ export default function V15Client() {
             </section>
 
             <section className="chartCard">
-              <div className="sectionHeading"><h2>常吃 Top 3</h2></div>
+              <div className="sectionHeading"><h2>最常選 Top 3</h2></div>
               {([
                 ["cuisine", "料理", stats.cuisineCounts],
                 ["restaurant", "餐廳", stats.restaurantCounts],
@@ -1015,8 +1030,8 @@ export default function V15Client() {
                   const total = filterHistoryByPeriod(history, statsPeriod).length;
                   return <><p>{matches.length} 次 · 佔完成決策 {total ? Math.round(matches.length / total * 100) : 0}%</p>
                     <p>最近一次：{matches[0] ? new Date(matches[0].createdAt).toLocaleDateString("zh-TW") : "尚無"}</p>
-                    {statsDrilldown.type === "cuisine" && <p>常吃餐廳：{[...new Set(matches.map((item) => item.restaurantName))].slice(0, 3).join("、")}</p>}
-                    {statsDrilldown.type !== "dish" && <p>常吃餐點：{[...new Set(matches.map((item) => item.dishName).filter(Boolean))].slice(0, 3).join("、") || "尚未記錄"}</p>}</>;
+                    {statsDrilldown.type === "cuisine" && <p>常選餐廳：{[...new Set(matches.map((item) => item.restaurantName))].slice(0, 3).join("、")}</p>}
+                    {statsDrilldown.type !== "dish" && <p>常選餐點：{[...new Set(matches.map((item) => item.dishName).filter(Boolean))].slice(0, 3).join("、") || "尚未記錄"}</p>}</>;
                 })()}
               </div>}
             </section>
@@ -1030,7 +1045,7 @@ export default function V15Client() {
             </section>
 
             <section className="chartCard">
-              <div className="sectionHeading"><h2>料理偏好</h2></div>
+              <div className="sectionHeading"><h2>選擇的料理</h2></div>
               {stats.cuisineCounts.length ? (
                 stats.cuisineCounts.slice(0, 6).map((item) => (
                   <Bar
@@ -1185,6 +1200,7 @@ export default function V15Client() {
                 {compare.includes(selected.id) ? "✓ 已加入比較" : "＋ 加入比較"}
               </button>
               <button onClick={() => toggleTry(selected.id)}>{foodDatabase.toTry.includes(selected.id) ? "✓ 想吃" : "＋ 想吃"}</button>
+              <button onClick={() => toggleVisited(selected.id)}>{foodDatabase.visited.includes(selected.id) ? "✓ 已吃過" : "＋ 標記吃過"}</button>
               <button className="dangerSoft" onClick={() => excludeRestaurant(selected.id)}>
                 不喜歡這家
               </button>
@@ -1215,6 +1231,7 @@ export default function V15Client() {
               <p className="eyebrow">DECISION MADE</p>
               <h1>今天就吃 {selected.name}。</h1>
               <p>{restaurantOpenState(selected, new Date(clock)).label} · 🚶 {selected.walk} 分鐘</p>
+              <p className="micro">已記下這次的決定；吃完後可另外標記「吃過」。</p>
             </section>
 
             <section className="detailCard">
@@ -1231,6 +1248,7 @@ export default function V15Client() {
                 <a href={selected.googleMapsUrl} target="_blank" rel="noreferrer">開始導航</a>
               )}
               {selected.phone && <a href={"tel:" + selected.phone}>打電話</a>}
+              <button onClick={() => toggleVisited(selected.id)}>{foodDatabase.visited.includes(selected.id) ? "✓ 已標記吃過（點此取消）" : "吃完後標記吃過"}</button>
               <button onClick={() => setView("home")}>回首頁</button>
             </div>
           </>

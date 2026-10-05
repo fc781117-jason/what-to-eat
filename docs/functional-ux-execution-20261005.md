@@ -14,7 +14,7 @@ Home starts one decision session → filter, roulette, nearby, compare and detai
 | Roulette | unknown cuisine → cuisine choice → restaurant/dish; known cuisine → restaurant/dish; reroll/skip/exclude/favorite/final pick | Demo dishes and restaurants |
 | Bottom navigation | four tabs; history behind Statistics | existing visual skin only |
 | Statistics | active mean/median/fastest, elapsed mean, 5/10-minute counts, abandonment, first choice, Top 3 and detail drilldown | selection counts, not verified actual meals |
-| Saved places | favorite, to try, visited, blacklist restore, tags, notes, custom lists | local storage; may be lost on browser reset |
+| Saved places | favorite, to try, explicit visited, blacklist restore, tags, notes, custom lists | local storage; may be lost on browser reset |
 | Compare | up to five swipe cards, preference winner, reasons and final pick | Demo data; URL without match is not invented |
 | Nearby | human-readable GPS address, accuracy, manual area label, user location map and separate Demo list | no fabricated Demo pins or walking routes |
 | Restaurant/dish detail | source labels, confidence gaps, source-classified explanation, selectable dishes and final dish action | no real photos, menu verification, reviews/hygiene evidence |
@@ -59,3 +59,10 @@ Proposed first controlled trial: a separate billing project, quota per API at or
 ## Delivery verification
 
 Local TypeScript check, six behavior tests and static Preview export passed. The initial implementation was committed as `9bc40dd783930f1655c7ccfca6e98d90a56a5aa0`; CI run `37299063589` and Preview run `37299063584` both passed, and `preview-static` contains an export built from that SHA. Subsequent direct-detail entry and documentation corrections require fresh CI/Preview confirmation on their final commit. The repository reports `has_pages: false`: publishing to the `preview-static` branch is an artifact, not an interactive hosted URL. The cloud browser blocked localhost, so mobile browser QA is not yet a pass. Do not enable Pages production deployment as a workaround; no production deployment is authorized.
+
+## Follow-up: detail return and confirmed eating
+
+- Restaurant detail now returns to its originating roulette, nearby, compare or category workflow, retaining the active Decision Session. Returning from a saved or home recommendation exits that detail and abandons an unfinished session as appropriate. Permanently excluding a restaurant from its detail returns to the originating screen.
+- The final restaurant/dish choice records a **decision**, not an actual meal. `visited` changes only when the user explicitly marks or unmarks the restaurant in its detail or departure screen. Statistics and rankings describe choices. Existing local `visited` records from the older automatic behavior are preserved with a review notice; they cannot safely be classified retrospectively as eaten or merely selected.
+- Six behavior tests, TypeScript and the ordinary and static-export builds pass locally. Browser interaction QA remains unverified: the agent-browser executable was obtained, but Chrome installation failed certificate verification (`UnknownIssuer`). No Vercel project for this repository was found in the connected account; GitHub Pages remains disabled. The static Preview workflow can update its branch, but there is no interactive Preview URL yet.
+- Live restaurant and dish data, route durations, cloud sync and import retain the cost, credential and provider gates above. Production remains HOLD.
