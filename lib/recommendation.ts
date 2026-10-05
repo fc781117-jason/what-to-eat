@@ -1,9 +1,60 @@
-import { Profile, Restaurant } from "./product";
+import type { Profile, Restaurant } from "./product";
 
 export type RecommendationReason = {
   score: number;
   reasons: string[];
 };
+
+const CONTEXT_ALIASES: Array<{ terms: string[]; contexts: string[] }> = [
+  { terms: ["約會", "情侶"], contexts: ["情侶"] },
+  { terms: ["一個人", "獨食", "自己吃"], contexts: ["一個人"] },
+  { terms: ["朋友", "聚餐"], contexts: ["朋友", "家庭"] },
+  { terms: ["家庭", "親子"], contexts: ["家庭"] },
+  { terms: ["快速", "趕時間"], contexts: ["快速吃"] },
+  { terms: ["聊天", "坐久一點"], contexts: ["慢慢聊天"] },
+];
+
+function supportsLateNight(restaurant: Restaurant) {
+  return Object.values(restaurant.weeklyHours).some((periods) => periods?.some(([, close]) => {
+    const [hour] = close.split(":").map(Number);
+    return hour >= 23 || hour <= 3;
+  }));
+}
+
+/** Matches explicit Demo fields and simple user intent without inventing venue attributes. */
+export function matchesRestaurantSearch(restaurant: Restaurant, rawQuery: string) {
+  let query = rawQuery.trim().toLowerCase();
+  if (!query) return true;
+
+  const budgetMatch = query.match(/(?:每人)?\s*(\d{2,5})\s*(?:元|塊)?\s*(?:以?內|以下|內)/);
+  if (budgetMatch) {
+    if (restaurant.priceMin > Number(budgetMatch[1])) return false;
+    query = query.replace(budgetMatch[0], " ");
+  }
+
+  const wantsLateNight = query.includes("宵夜") || query.includes("深夜");
+  if (wantsLateNight) {
+    if (!supportsLateNight(restaurant)) return false;
+    query = query.replaceAll("宵夜", " ").replaceAll("深夜", " ");
+  }
+
+  for (const alias of CONTEXT_ALIASES) {
+    const usedTerms = alias.terms.filter((term) => query.includes(term));
+    if (!usedTerms.length) continue;
+    if (!alias.contexts.some((context) => restaurant.contexts.includes(context))) return false;
+    usedTerms.forEach((term) => { query = query.replaceAll(term, " "); });
+  }
+
+  const terms = query.split(/[\s,，、/]+/).filter(Boolean);
+  const haystack = [
+    restaurant.name,
+    restaurant.cuisine,
+    ...restaurant.signature,
+    ...restaurant.menuItems.map((item) => item.name),
+    ...restaurant.contexts,
+  ].join(" ").toLowerCase();
+  return terms.every((term) => haystack.includes(term));
+}
 
 export function scoreRestaurant(restaurant: Restaurant, profile: Profile): RecommendationReason {
   let score = restaurant.rating * 10;

@@ -7,6 +7,7 @@ import {
 import { buildDecisionBehaviorStats, buildFoodStats } from '../lib/analytics.ts';
 import { parseGoogleMapsInput, dishesFor } from '../lib/functional-data.ts';
 import { DEMO_RESTAURANTS } from '../lib/product.ts';
+import { matchesRestaurantSearch } from '../lib/recommendation.ts';
 
 test('active clock pauses in background and abandoned time does not affect successful average', () => {
   let first = createDecisionSession('roulette', 1000);
@@ -65,4 +66,15 @@ test('Demo dish price remains explicitly sourced as Demo', () => {
   assert.ok(dishes.length > 0);
   assert.equal(dishes[0].source, 'demo');
   assert.equal(dishes[0].restaurantId, DEMO_RESTAURANTS[0].id);
+});
+
+test('natural food search combines cuisine, context, budget and late-night intent', () => {
+  const curry = DEMO_RESTAURANTS.find((restaurant) => restaurant.name === '慢慢咖哩');
+  const skewers = DEMO_RESTAURANTS.find((restaurant) => restaurant.name === '夜町串燒');
+  const noodles = DEMO_RESTAURANTS.find((restaurant) => restaurant.name === '老張牛肉麵');
+  assert.ok(curry && skewers && noodles);
+  assert.equal(matchesRestaurantSearch(curry, '咖哩 一個人 300 元內'), true);
+  assert.equal(matchesRestaurantSearch(curry, '約會 150 元內'), false);
+  assert.equal(matchesRestaurantSearch(skewers, '日式 宵夜 約會 1000元內'), true);
+  assert.equal(matchesRestaurantSearch(noodles, '宵夜'), false);
 });

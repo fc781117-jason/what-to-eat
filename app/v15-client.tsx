@@ -29,7 +29,7 @@ import {
   THEME_OPTIONS,
   type ViewId,
 } from "../lib/product";
-import { rankRestaurants, recommendationHint, scoreRestaurant, weightedPick } from "../lib/recommendation";
+import { matchesRestaurantSearch, rankRestaurants, recommendationHint, scoreRestaurant, weightedPick } from "../lib/recommendation";
 import { dishesFor, parseGoogleMapsInput } from "../lib/functional-data";
 import {
   abandonDecisionSession,
@@ -228,15 +228,9 @@ export default function V15Client() {
   );
 
   const categoryResults = useMemo(() => {
-    const q = search.trim().toLowerCase();
     return eligible.filter((restaurant) => {
       if (selectedCuisine !== "全部" && restaurant.cuisine !== selectedCuisine) return false;
-      if (!q) return true;
-      return (
-        restaurant.name.toLowerCase().includes(q) ||
-        restaurant.cuisine.toLowerCase().includes(q) ||
-        restaurant.signature.some((dish) => dish.toLowerCase().includes(q))
-      );
+      return matchesRestaurantSearch(restaurant, search);
     });
   }, [search, selectedCuisine, eligible]);
 
@@ -916,8 +910,9 @@ export default function V15Client() {
                 className="textInput"
                 value={search}
                 onChange={(event) => { setSearch(event.target.value); eventInSession("filter_change"); }}
-                placeholder="搜尋店名、料理或餐點"
+                placeholder="店名、餐點、約會、宵夜、300 元內"
               />
+              <p className="micro">可組合條件，例如「咖哩 一個人 300 元內」；價格以目前標示的每人起價篩選。</p>
               <div className="horizontalChips">
                 {["全部", ...CUISINE_OPTIONS].map((cuisine) => (
                   <button
