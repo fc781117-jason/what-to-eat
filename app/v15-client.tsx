@@ -376,12 +376,12 @@ export default function V15Client() {
   }
 
   function openDetail(restaurant: Restaurant, source: HistoryEntry["source"]) {
-    const base = activeDecisionRef.current;
-    if (base) {
-      let next = recordDecisionEvent(base, "candidate_view", { candidateId: restaurant.id });
-      next = recordDecisionEvent(next, "restaurant_detail_view");
-      updateActive(next);
-    }
+    // Home recommendations and saved places can open detail without using a mode card.
+    // Treat that tap as the start of a decision so its final confirmation works too.
+    const base = activeDecisionRef.current ?? createDecisionSession(source);
+    let next = recordDecisionEvent(base, "candidate_view", { candidateId: restaurant.id });
+    next = recordDecisionEvent(next, "restaurant_detail_view");
+    updateActive(next);
     setSelected(restaurant);
     setSelectedDish(null);
     setSelectedSource(source);
