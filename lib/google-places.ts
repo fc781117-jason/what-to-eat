@@ -23,13 +23,31 @@ const PRICE_LEVELS: Record<string, string> = {
   PRICE_LEVEL_VERY_EXPENSIVE: "$$$$",
 };
 
-function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
+export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
   const radians = (value: number) => (value * Math.PI) / 180;
   const dLat = radians(lat2 - lat1);
   const dLng = radians(lng2 - lng1);
   const a = Math.sin(dLat / 2) ** 2
     + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(dLng / 2) ** 2;
   return Math.round(6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+export function placesFieldMask(enterprise: boolean) {
+  return [
+    "places.id", "places.displayName", "places.formattedAddress", "places.location",
+    "places.googleMapsUri", "places.primaryTypeDisplayName",
+    ...(enterprise ? ["places.rating", "places.userRatingCount", "places.priceLevel", "places.currentOpeningHours.openNow"] : []),
+  ].join(",");
+}
+
+export function placeDetailsFieldMask(enterprise: boolean) {
+  return placesFieldMask(enterprise).replaceAll("places.", "");
+}
+
+export function placesWithinRadius(places: GooglePlace[], origin: { lat: number; lng: number }, radius: number) {
+  return places.filter((place) => typeof place.location?.latitude === "number" &&
+    typeof place.location?.longitude === "number" &&
+    haversineMeters(origin.lat, origin.lng, place.location.latitude, place.location.longitude) <= radius);
 }
 
 export function googlePlaceToRestaurant(
@@ -53,7 +71,8 @@ export function googlePlaceToRestaurant(
     cuisine,
     rating: typeof place.rating === "number" ? place.rating : 0,
     reviewCount: typeof place.userRatingCount === "number" ? place.userRatingCount : 0,
-    walk: distance ? Math.max(1, Math.ceil(distance / 80)) : 0,
+    // Straight-line distance is not a walking route or travel time.
+    walk: 0,
     distance,
     priceMin: 0,
     priceMax: 0,
@@ -73,4 +92,3 @@ export function googlePlaceToRestaurant(
     photoLabels: [],
   };
 }
-

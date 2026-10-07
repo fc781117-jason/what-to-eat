@@ -74,7 +74,7 @@ export function scoreRestaurant(restaurant: Restaurant, profile: Profile): Recom
     reasons.push(`適合${contextMatches.slice(0, 2).join("、")}`);
   }
 
-  if (profile.walk > 0) {
+  if (profile.walk > 0 && restaurant.walk > 0) {
     const walkFit = Math.max(0, profile.walk - restaurant.walk);
     score += Math.min(walkFit, 10) * 1.2;
     if (restaurant.walk <= Math.min(profile.walk, 8)) reasons.push("走路很近");
@@ -118,5 +118,5 @@ export function weightedPick(restaurants: Restaurant[], profile: Profile) {
 
 export function recommendationHint(restaurant: Restaurant, profile: Profile) {
   const { reasons } = scoreRestaurant(restaurant, profile);
-  return reasons.length ? reasons.slice(0, 2).join(" · ") : "符合目前條件";
+  return reasons.length ? reasons.slice(0, 2).join(" · ") : "已列入候選；請查看店家資料";
 }

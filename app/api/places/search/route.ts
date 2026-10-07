@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { googlePlaceToRestaurant, type GooglePlace } from "../../../../lib/google-places";
+import { googlePlaceToRestaurant, placesFieldMask, placesWithinRadius, type GooglePlace } from "../../../../lib/google-places";
 
 export const dynamic = "force-dynamic";
 
@@ -44,23 +44,15 @@ export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q")?.trim().slice(0, 120) || "";
 
   const hasCoordinates = lat !== null && lng !== null && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+  if ((request.nextUrl.searchParams.has("lat") || request.nextUrl.searchParams.has("lng")) && !hasCoordinates) {
+    return NextResponse.json({ code: "INVALID_LOCATION", message: "位置座標無效，請重新定位。" }, { status: 400 });
+  }
   if (!hasCoordinates && !query) {
     return NextResponse.json({ code: "LOCATION_REQUIRED", message: "請先取得有效位置，或輸入地區與搜尋內容。" }, { status: 400 });
   }
 
   const enterprise = process.env.GOOGLE_PLACES_FIELD_TIER === "enterprise";
-  const fieldMask = [
-    "places.id",
-    "places.displayName",
-    "places.formattedAddress",
-    "places.location",
-    "places.rating",
-    "places.userRatingCount",
-    "places.priceLevel",
-    "places.googleMapsUri",
-    "places.primaryTypeDisplayName",
-    ...(enterprise ? ["places.currentOpeningHours.openNow"] : []),
-  ].join(",");
+  const fieldMask = placesFieldMask(enterprise);
 
   const isTextSearch = Boolean(query);
   const endpoint = isTextSearch
@@ -102,7 +94,11 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json() as { places?: GooglePlace[] };
-    const restaurants = (data.places || [])
+    // Text Search locationBias is a preference, so enforce the chosen radius here.
+    const scopedPlaces = hasCoordinates
+      ? placesWithinRadius(data.places || [], { lat: lat!, lng: lng! }, radius)
+      : data.places || [];
+    const restaurants = scopedPlaces
       .map((place) => googlePlaceToRestaurant(place, hasCoordinates ? { lat: lat!, lng: lng! } : undefined))
       .filter(Boolean);
     return NextResponse.json({ restaurants, source: "google", retrievedAt: new Date().toISOString() });

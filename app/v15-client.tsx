@@ -29,7 +29,7 @@ import {
   THEME_OPTIONS,
   type ViewId,
 } from "../lib/product";
-import { matchesRestaurantSearch, rankRestaurants, recommendationHint, scoreRestaurant, weightedPick } from "../lib/recommendation";
+import { rankRestaurants, recommendationHint, scoreRestaurant, weightedPick } from "../lib/recommendation";
 import { dishesFor, parseGoogleMapsInput } from "../lib/functional-data";
 import {
   abandonDecisionSession,
@@ -66,6 +66,14 @@ function sourceLabel(source: HistoryEntry["source"]) {
   }[source];
 }
 
+function distanceText(restaurant: Restaurant) {
+  return restaurant.distance > 0 ? `直線距離約 ${restaurant.distance}m` : "距離待定位確認";
+}
+
+function ratingText(restaurant: Restaurant) {
+  return restaurant.rating > 0 ? `Google 評分 ${restaurant.rating}（${restaurant.reviewCount.toLocaleString()} 則）` : "Google 評分尚未取得";
+}
+
 export default function V15Client() {
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
   const [hydrated, setHydrated] = useState(false);
@@ -97,6 +105,8 @@ export default function V15Client() {
   const [location, setLocation] = useState<ResolvedLocation | null>(null);
   const [locationStatus, setLocationStatus] = useState("尚未定位");
   const [liveRestaurants, setLiveRestaurants] = useState<Restaurant[]>([]);
+  const [knownRestaurants, setKnownRestaurants] = useState<Restaurant[]>([]);
+  const [compareMatches, setCompareMatches] = useState<Restaurant[]>([]);
   const [placesStatus, setPlacesStatus] = useState("請先確認位置，再搜尋真實餐廳。");
   const [placesLoading, setPlacesLoading] = useState(false);
   const [searchRadius, setSearchRadius] = useState(2000);
@@ -113,6 +123,7 @@ export default function V15Client() {
   const [statsDrilldown, setStatsDrilldown] = useState<{ type: "cuisine" | "restaurant" | "dish"; label: string } | null>(null);
   const [clock, setClock] = useState(Date.now());
   const rouletteResultRef = useRef<HTMLElement | null>(null);
+  const placesRequestRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -225,10 +236,10 @@ export default function V15Client() {
     () =>
       restaurantCatalog.filter((restaurant) => {
         if (profile.excludedRestaurantIds.includes(restaurant.id)) return false;
-        if (onlyOpen && !restaurantOpenState(restaurant, new Date(clock)).open) return false;
+        if (onlyOpen && restaurantOpenState(restaurant, new Date(clock)).unknown !== true && !restaurantOpenState(restaurant, new Date(clock)).open) return false;
         if (profile.walk && restaurant.walk > profile.walk) return false;
         if (budgetMax && restaurant.priceMin && restaurant.priceMin > budgetMax) return false;
-        if (minRating && restaurant.rating < minRating) return false;
+        if (minRating && restaurant.rating > 0 && restaurant.rating < minRating) return false;
         return true;
       }),
     [restaurantCatalog, profile.excludedRestaurantIds, profile.walk, budgetMax, onlyOpen, minRating, clock],
@@ -245,16 +256,18 @@ export default function V15Client() {
   );
 
   const categoryResults = useMemo(() => {
-    return eligible.filter((restaurant) => {
-      if (selectedCuisine !== "全部" && restaurant.cuisine !== selectedCuisine) return false;
-      return matchesRestaurantSearch(restaurant, search);
-    });
-  }, [search, selectedCuisine, eligible]);
+    // The Places response already applied the query. A second local text filter
+    // would discard valid Google matches (e.g. a date-night query).
+    return eligible;
+  }, [eligible]);
 
   const compareRestaurants = compare.filter((id) => !profile.excludedRestaurantIds.includes(id))
-    .map((id) => restaurantCatalog.find((restaurant) => restaurant.id === id))
+    .map((id) => knownRestaurants.find((restaurant) => restaurant.id === id))
     .filter(Boolean) as Restaurant[];
-  const compareWinner = compareRestaurants.length >= 2 ? rankRestaurants(compareRestaurants, profile)[0] : null;
+  const rankedCompare = compareRestaurants.length >= 2 ? rankRestaurants(compareRestaurants, profile) : [];
+  const compareWinner = rankedCompare.length >= 2 &&
+    scoreRestaurant(rankedCompare[0], profile).score > scoreRestaurant(rankedCompare[1], profile).score
+      ? rankedCompare[0] : null;
 
   function toggleTry(id: string) {
     setFoodDatabase((current) => ({ ...current, toTry: toggleValue(current.toTry, id) }));
@@ -405,15 +418,18 @@ export default function V15Client() {
   async function searchLiveRestaurants(
     resolved: ResolvedLocation | null = location,
     query = "",
+    updateCandidates = true,
+    requestedRadius = searchRadius,
   ) {
     if (!resolved && !query.trim()) {
       setPlacesStatus("請使用目前位置，或輸入用餐地區後再搜尋。");
       return [] as Restaurant[];
     }
+    const requestId = updateCandidates ? ++placesRequestRef.current : placesRequestRef.current;
     setPlacesLoading(true);
     setPlacesStatus(query ? "正在搜尋符合條件的真實餐廳…" : "正在搜尋附近的真實餐廳…");
     try {
-      const params = new URLSearchParams({ radius: String(searchRadius) });
+      const params = new URLSearchParams({ radius: String(requestedRadius) });
       if (resolved) {
         params.set("lat", String(resolved.lat));
         params.set("lng", String(resolved.lng));
@@ -423,22 +439,31 @@ export default function V15Client() {
       const data = await response.json() as { restaurants?: Restaurant[]; message?: string };
       if (!response.ok) throw new Error(data.message || "Google Places 搜尋失敗");
       const results = data.restaurants || [];
-      setLiveRestaurants((current) => {
+      setKnownRestaurants((current) => {
         const merged = [...results, ...current];
         return merged.filter((restaurant, index) => merged.findIndex((item) => item.id === restaurant.id) === index);
       });
-      setPlacesStatus(results.length ? `已從 Google Places 取得 ${results.length} 家真實餐廳。` : "這個範圍目前沒有搜尋結果，請調整範圍或關鍵字。");
+      if (updateCandidates && requestId === placesRequestRef.current) setLiveRestaurants(results);
+      if (requestId === placesRequestRef.current) setPlacesStatus(results.length ? `已從 Google Places 取得 ${results.length} 家真實餐廳。` : "這個範圍目前沒有搜尋結果，請調整範圍或關鍵字。");
       return results;
     } catch (error) {
-      setPlacesStatus(error instanceof Error ? error.message : "Google Places 搜尋失敗");
+      if (updateCandidates && requestId === placesRequestRef.current) setLiveRestaurants([]);
+      if (requestId === placesRequestRef.current) setPlacesStatus(error instanceof Error ? error.message : "Google Places 搜尋失敗");
       return [] as Restaurant[];
     } finally {
-      setPlacesLoading(false);
+      if (requestId === placesRequestRef.current) setPlacesLoading(false);
     }
+  }
+
+  function changeRadius(radius: number) {
+    setSearchRadius(radius);
+    if (location) void searchLiveRestaurants(location, "", true, radius);
   }
 
   async function locate() {
     setLocationStatus("正在取得 GPS 與附近地址…");
+    placesRequestRef.current += 1;
+    setLiveRestaurants([]);
     try {
       const resolved = await resolveBrowserLocation();
       setLocation(resolved);
@@ -456,7 +481,9 @@ export default function V15Client() {
       setPlacesStatus("請先輸入車站、行政區或商圈名稱。");
       return;
     }
+    placesRequestRef.current += 1;
     setLocation(null);
+    setLiveRestaurants([]);
     setManualAreaConfirmed(area);
     setLocationStatus(`手動地區：${area}`);
     eventInSession("filter_change");
@@ -509,35 +536,38 @@ export default function V15Client() {
       return;
     }
     const input = parseGoogleMapsInput(raw);
-    if (input.kind === "unsupported" || input.kind === "shortLink" || input.kind === "placeId") {
-      setCompareNotice(input.kind === "shortLink" ? "Google Maps 短網址需要安全解析服務；請先貼完整網址或輸入店名。" :
-        input.kind === "placeId" ? "已辨識 Place ID；詳細資料端點會在 Places 金鑰啟用後接續處理。" : "無法辨識網址，請輸入店名或 Google Maps 網址。");
+    if (input.kind === "unsupported" || input.kind === "shortLink") {
+      setCompareNotice(input.kind === "shortLink" ? "Google Maps 短網址尚無法安全解析；請貼完整店家網址或輸入店名。" : "無法辨識網址，請輸入店名或 Google Maps 網址。");
       return;
     }
-    const text = input.value;
-    let matched = restaurantCatalog.find(
-      (restaurant) => text.includes(restaurant.name) || restaurant.name.includes(text.trim()),
-    );
-
-    if (matched) {
-      if (!compare.includes(matched.id)) toggleCompare(matched.id);
-      setCompareNotice("已加入：" + matched.name);
-      return;
-    }
-
     if (!location && !manualAreaConfirmed) {
       setCompareNotice("請先使用目前位置，或在上方輸入用餐地區，避免搜尋到同名但不同區域的店。");
       return;
     }
+    setCompareMatches([]);
     setCompareNotice("正在 Google Places 搜尋…");
-    const results = await searchLiveRestaurants(location, [manualAreaConfirmed, text].filter(Boolean).join(" "));
-    matched = results[0];
-    if (!matched) {
+    if (input.kind === "placeId") {
+      try {
+        const response = await fetch(`/api/places/details?id=${encodeURIComponent(input.value)}`, { cache: "no-store" });
+        const data = await response.json() as { restaurant?: Restaurant; message?: string };
+        if (!response.ok || !data.restaurant) throw new Error(data.message || "無法取得這家餐廳的 Google 資料。");
+        const restaurant = data.restaurant;
+        setKnownRestaurants((current) => [restaurant, ...current.filter((item) => item.id !== restaurant.id)]);
+        setCompareMatches([restaurant]);
+        setCompareNotice("請核對地址並點選正確分店，才會加入比較。");
+      } catch (error) {
+        setCompareNotice(error instanceof Error ? error.message : "無法查詢 Google Place ID。");
+      }
+      return;
+    }
+    const text = input.value;
+    const results = await searchLiveRestaurants(location, [manualAreaConfirmed, text].filter(Boolean).join(" "), false);
+    if (!results.length) {
       setCompareNotice("找不到符合的真實餐廳，請輸入更完整的店名與地區。");
       return;
     }
-    if (!compare.includes(matched.id)) toggleCompare(matched.id);
-    setCompareNotice(`已從 Google Places 加入：${matched.name}`);
+    setCompareMatches(results);
+    setCompareNotice("請核對地址並點選正確分店，才會加入比較。");
   }
 
   function goHome() {
@@ -711,13 +741,13 @@ export default function V15Client() {
                 </button>
               </div>
               <div className="chips">
-                <span>步行 {profile.walk} 分鐘內</span>
-                <span>{PRICE_BANDS.find((item) => item.id === profile.priceBand)?.label}</span>
+                <span>步行時間尚未接入路線資料</span>
+                <span>實際花費請見店家資訊</span>
                 <button onClick={() => setMinRating((current) => (current ? 0 : 4.5))}>
-                  {minRating ? `評分 ${minRating}+` : "評分不限"}
+                  {minRating ? `已知評分 ${minRating}+` : "評分不限"}
                 </button>
                 <button className={onlyOpen ? "active" : ""} onClick={() => setOnlyOpen(!onlyOpen)}>
-                  ◷ {onlyOpen ? "只看營業中" : "營業不限"}
+                  ◷ {onlyOpen ? "排除已知休息店家" : "營業不限"}
                 </button>
               </div>
             </section>
@@ -755,7 +785,7 @@ export default function V15Client() {
                   <div><b>{location ? "位置已確認" : "先告訴我你在哪裡"}</b><small>{location ? locationStatus : "需要位置才能建立正確的抽選範圍"}</small></div>
                 </div>
                 <div className="locationControls">
-                  <select aria-label="搜尋範圍" value={searchRadius} onChange={(event) => setSearchRadius(Number(event.target.value))}>
+                  <select aria-label="搜尋範圍" value={searchRadius} disabled={!location} onChange={(event) => changeRadius(Number(event.target.value))}>
                     <option value={1000}>1 公里內</option>
                     <option value={2000}>2 公里內</option>
                     <option value={3000}>3 公里內</option>
@@ -769,7 +799,7 @@ export default function V15Client() {
                     <input aria-label="手動輸入抽選地區" placeholder="例如：板橋站、信義區" value={manualArea} onChange={(event) => setManualArea(event.target.value)} />
                     <button onClick={() => void useManualArea()} disabled={placesLoading}>使用此地區</button>
                   </div>
-                  {manualAreaConfirmed && <small>目前以「{manualAreaConfirmed}」作為搜尋地區；不顯示距離。</small>}
+                  {manualAreaConfirmed && <small>目前以「{manualAreaConfirmed}」搜尋；手動地區無法保證公里半徑，也不顯示距離。</small>}
                 </div>
                 <p className="micro liveStatus">{placesStatus}</p>
               </div>
@@ -815,8 +845,7 @@ export default function V15Client() {
                     <span className="sourceBadge">{rouletteWinner.sourceLabel}</span>
                     <h2>{rouletteWinner.name}</h2>
                     <p>
-                      Google 評分 {rouletteWinner.rating || "尚無"}（{rouletteWinner.reviewCount.toLocaleString()}） ·{" "}
-                      {rouletteWinner.walk ? `${rouletteWinner.walk} 分 · ` : ""}
+                      {ratingText(rouletteWinner)} · {distanceText(rouletteWinner)} ·{" "}
                       {restaurantPriceText(rouletteWinner)}
                     </p>
                   </div>
@@ -885,7 +914,7 @@ export default function V15Client() {
                 <button className="secondaryBtn" onClick={locate}>
                   {location ? "重新定位並更新" : "使用目前位置"}
                 </button>
-                <select className="textInput" aria-label="附近搜尋範圍" value={searchRadius} onChange={(event) => setSearchRadius(Number(event.target.value))}>
+                <select className="textInput" aria-label="附近搜尋範圍" value={searchRadius} disabled={!location} onChange={(event) => changeRadius(Number(event.target.value))}>
                   <option value={1000}>搜尋 1 公里內</option>
                   <option value={2000}>搜尋 2 公里內</option>
                   <option value={3000}>搜尋 3 公里內</option>
@@ -898,6 +927,7 @@ export default function V15Client() {
                     <button onClick={() => void useManualArea()} disabled={placesLoading}>使用此地區</button>
                   </div>
                 </div>
+                {manualAreaConfirmed && <p className="micro">手動地區以地名搜尋，無法保證公里半徑。</p>}
                 <p className="micro liveStatus">{placesStatus}</p>
               </div>
             </section>
@@ -942,7 +972,7 @@ export default function V15Client() {
             <section className="pageIntro compareIntro">
               <p className="eyebrow">COMPARE RESTAURANTS</p>
               <h1>候選太多，不知道怎麼選？</h1>
-              <p>聚餐、約會或臨時選店時，把 2～5 家餐廳放進來；系統會用同一組距離、評分、價格與個人偏好條件比較。</p>
+              <p>聚餐、約會或臨時選店時，把 2～5 家餐廳放進來；核對地址後，比較 Google 已取得的資料與你的偏好。缺少的欄位會明確標示。</p>
               <ol className="flowSteps">
                 <li><span>1</span>確認用餐地區</li>
                 <li><span>2</span>貼網址或輸入店名</li>
@@ -988,6 +1018,13 @@ export default function V15Client() {
                 ＋ 加入另一家
               </button>
               {compareNotice && <p className="micro">{compareNotice}</p>}
+              {compareMatches.length > 0 && <div className="compareMatchList" aria-label="選擇正確分店">
+                {compareMatches.map((restaurant) => <button key={restaurant.id} disabled={!compare.includes(restaurant.id) && compare.length >= 5} onClick={() => {
+                  if (!compare.includes(restaurant.id)) toggleCompare(restaurant.id);
+                  setCompareNotice(`已加入：${restaurant.name} · ${restaurant.address}`);
+                  setCompareMatches([]);
+                }}><b>{restaurant.name}</b><small>{restaurant.address}</small></button>)}
+              </div>}
             </section>
 
             <section className="comparePills">
@@ -1009,10 +1046,10 @@ export default function V15Client() {
                       <div className="compareRank">候選</div>
                       <h3>{restaurant.name}</h3>
                       <div className="compareFacts">
-                        <span>Google 評分 {restaurant.rating || "尚無"}（{restaurant.reviewCount.toLocaleString()}）</span>
-                        <span>{restaurant.walk ? `步行 ${restaurant.walk} 分` : "距離待確認"}</span>
+                        <span>{ratingText(restaurant)}</span>
+                        <span>{distanceText(restaurant)}</span>
                         <span>{restaurantPriceText(restaurant)}</span>
-                        <span className={open.open ? "good" : "bad"}>{open.label}</span>
+                        <span className={open.unknown ? "" : open.open ? "good" : "bad"}>{open.label}</span>
                       </div>
                       <p>{restaurant.signature.slice(0, 2).join("、")}</p>
                       <button className="primaryMini" onClick={() => openDetail(restaurant, "compare")}>
@@ -1030,12 +1067,13 @@ export default function V15Client() {
               <h2>目前較符合：{compareWinner.name}</h2>
               <p>{[
                 ...recommendationHint(compareWinner, profile).split(" · "),
-                `評分 ${compareWinner.rating}／5`,
-                compareWinner.walk ? `步行約 ${compareWinner.walk} 分鐘` : "距離尚待定位確認",
+                ratingText(compareWinner),
+                distanceText(compareWinner),
               ].slice(0, 3).join("；")}</p>
               <p className="micro">依 Google Places 基本欄位與你的偏好規則排序；缺少的資料不會自行補寫。</p>
               <button className="primaryBtn" onClick={() => recordDecision(compareWinner, "compare")}>今天就吃這家</button>
             </section>}
+            {rankedCompare.length >= 2 && !compareWinner && <p className="truthNotice">目前沒有足夠的可比較資料來判定哪家較合適；請查看各店地址與 Google Maps 資訊後自行決定。</p>}
 
             <section className="sectionBlock">
               <div className="sectionHeading">
@@ -1072,14 +1110,14 @@ export default function V15Client() {
             <section className="discoveryLocation compact">
               <div><span className="stepDot">1</span><div><b>{location || manualAreaConfirmed ? "搜尋位置已確認" : "要搜尋目前位置附近嗎？"}</b><small>{location || manualAreaConfirmed ? locationStatus : "可以開啟定位，也可以手動輸入地區"}</small></div></div>
               <div className="locationControls">
-                <select aria-label="分類搜尋範圍" value={searchRadius} onChange={(event) => setSearchRadius(Number(event.target.value))}>
+                <select aria-label="分類搜尋範圍" value={searchRadius} disabled={!location} onChange={(event) => changeRadius(Number(event.target.value))}>
                   <option value={1000}>1 公里內</option><option value={2000}>2 公里內</option><option value={3000}>3 公里內</option><option value={5000}>5 公里內</option>
                 </select>
                 <button className="secondaryBtn" onClick={locate} disabled={placesLoading}>{location ? "更新位置" : "使用目前位置"}</button>
               </div>
               <div className="manualAreaRow">
                 <span>或不開定位</span>
-                <div className="compareInputRow"><input aria-label="手動輸入搜尋地區" placeholder="例如：逢甲夜市、左營站" value={manualArea} onChange={(event) => setManualArea(event.target.value)} /><button onClick={() => void useManualArea()} disabled={placesLoading}>使用此地區</button></div>
+                <div className="compareInputRow"><input aria-label="手動輸入搜尋地區" placeholder="例如：逢甲夜市、左營站" value={manualArea} onChange={(event) => setManualArea(event.target.value)} /><button onClick={() => void useManualArea([selectedCuisine === "全部" ? "" : selectedCuisine, search].filter(Boolean).join(" ") || "餐廳")} disabled={placesLoading}>使用此地區</button></div>
               </div>
               <p className="micro liveStatus">{placesStatus}</p>
             </section>
@@ -1092,13 +1130,17 @@ export default function V15Client() {
                   onChange={(event) => { setSearch(event.target.value); eventInSession("filter_change"); }}
                   placeholder="店名、料理、約會、宵夜"
                 /><button onClick={() => void searchLiveRestaurants(location, [manualAreaConfirmed, selectedCuisine === "全部" ? "" : selectedCuisine, search].filter(Boolean).join(" "))} disabled={(!location && !manualAreaConfirmed) || placesLoading}>{placesLoading ? "搜尋中" : "搜尋"}</button></div>
-              <p className="micro">Google Places 不提供可靠的每人實際消費金額；預算欄位只會使用 Google 的價格級距，不會再拿假價格篩選。</p>
+              <p className="micro">定位搜尋會限制在選定半徑內；手動地區以地名搜尋，不能保證公里半徑。每人實際消費金額尚無可信資料。</p>
               <div className="horizontalChips">
                 {["全部", ...CUISINE_OPTIONS].map((cuisine) => (
                   <button
                     key={cuisine}
                     className={selectedCuisine === cuisine ? "selected" : ""}
-                    onClick={() => { setSelectedCuisine(cuisine); eventInSession("filter_change"); }}
+                    onClick={() => {
+                      setSelectedCuisine(cuisine);
+                      eventInSession("filter_change");
+                      if (location || manualAreaConfirmed) void searchLiveRestaurants(location, [manualAreaConfirmed, cuisine === "全部" ? "" : cuisine, search].filter(Boolean).join(" "));
+                    }}
                   >
                     {cuisine}
                   </button>
@@ -1136,7 +1178,7 @@ export default function V15Client() {
             </div>
             {savedTab === "visited" && <p className="micro">舊版曾在選定餐廳時自動標記「吃過」；請點進餐廳確認，並可取消不正確的標記。</p>}
             <section className="restaurantList">
-              {restaurantCatalog.filter((restaurant) => (savedTab === "favorites" ? favorites : foodDatabase[savedTab]).includes(restaurant.id)).map(
+              {knownRestaurants.filter((restaurant) => (savedTab === "favorites" ? favorites : foodDatabase[savedTab]).includes(restaurant.id)).map(
                 (restaurant) => (
                   <RestaurantCard
                     key={restaurant.id}
@@ -1171,7 +1213,7 @@ export default function V15Client() {
             {selectedListName && Object.hasOwn(foodDatabase.lists, selectedListName) && <section className="sectionBlock">
               <div className="sectionHeading"><h2>{selectedListName}</h2><span>{foodDatabase.lists[selectedListName].length} 家</span></div>
               {foodDatabase.lists[selectedListName].length ? <div className="restaurantList">
-                {foodDatabase.lists[selectedListName].map((id) => restaurantCatalog.find((item) => item.id === id)).filter(Boolean).map((restaurant) => <div className="savedListRestaurant" key={restaurant!.id}>
+                {foodDatabase.lists[selectedListName].map((id) => knownRestaurants.find((item) => item.id === id)).filter(Boolean).map((restaurant) => <div className="savedListRestaurant" key={restaurant!.id}>
                   <RestaurantCard
                     restaurant={restaurant!}
                     favorite={favorites.includes(restaurant!.id)}
@@ -1352,15 +1394,15 @@ export default function V15Client() {
               </div>
               <h1>{selected.name}</h1>
               <p className="detailMeta">
-                Google 評分 {selected.rating || "尚無"}（{selected.reviewCount.toLocaleString()} 則） · {selected.cuisine}
+                {ratingText(selected)} · {selected.cuisine}
               </p>
 
               <div className="factGrid">
-                <div><small>步行</small><b>{selected.walk ? `${selected.walk} 分 · ${selected.distance}m` : "距離待定位確認"}</b></div>
+                <div><small>距離</small><b>{distanceText(selected)}</b></div>
                 <div><small>價格級距</small><b>{restaurantPriceText(selected)}</b></div>
                 <div>
                   <small>營業</small>
-                  <b className={restaurantOpenState(selected, new Date(clock)).open ? "good" : "bad"}>
+                  <b className={restaurantOpenState(selected, new Date(clock)).unknown ? "" : restaurantOpenState(selected, new Date(clock)).open ? "good" : "bad"}>
                     {restaurantOpenState(selected, new Date(clock)).label}
                   </b>
                 </div>
@@ -1392,7 +1434,7 @@ export default function V15Client() {
               <p className="eyebrow">WHY THIS PLACE</p>
               <h2>為什麼推薦</h2>
               <p>偏好排序分數 {Math.round(scoreRestaurant(selected, profile).score)}（個人化排序用途，非評分百分比）</p>
-              <p><b>Google Places 可查資料：</b>{selected.cuisine}、評分 {selected.rating || "尚無"}、{selected.walk ? `步行約 ${selected.walk} 分` : "距離待確認"}、{restaurantOpenState(selected, new Date(clock)).label}。</p>
+              <p><b>Google Places 可查資料：</b>{selected.cuisine}、{ratingText(selected)}、{distanceText(selected)}、{restaurantOpenState(selected, new Date(clock)).label}。</p>
               <p><b>個人偏好：</b>{profile.favoriteCuisines.includes(selected.cuisine) ? `你選過喜歡 ${selected.cuisine}` : "未設定這類料理偏好"}。</p>
               <p><b>推論：</b>{recommendationHint(selected, profile)}；來自偏好規則，並非已查證的店家優點。</p>
               {selected.source === "demo" && <p><b>測試資料備註：</b>{selected.review}</p>}
@@ -1464,7 +1506,7 @@ export default function V15Client() {
               <Mascot id={profile.mascot} mood="celebrate" size={118} />
               <p className="eyebrow">DECISION MADE</p>
               <h1>今天就吃 {selected.name}。</h1>
-              <p>{restaurantOpenState(selected, new Date(clock)).label}{selected.walk ? ` · 步行 ${selected.walk} 分鐘` : ""}</p>
+              <p>{restaurantOpenState(selected, new Date(clock)).label} · {distanceText(selected)}</p>
               <p className="micro">已記下這次的決定；吃完後可另外標記「吃過」。</p>
             </section>
 
@@ -1580,7 +1622,7 @@ export default function V15Client() {
               {profile.excludedRestaurantIds.length ? (
                 <div className="excludedList">
                   {profile.excludedRestaurantIds.map((id) => {
-                    const restaurant = restaurantCatalog.find((item) => item.id === id);
+                    const restaurant = knownRestaurants.find((item) => item.id === id);
                     return (
                       <button
                         key={id}
@@ -1891,10 +1933,10 @@ function RestaurantCard({
       <button className="restaurantInfo" onClick={onOpen}>
         <div className="restaurantLine">
           <b>{restaurant.name}</b>
-          <span className={open.open ? "good" : "bad"}>{open.open ? "營業中" : "休息"}</span>
+          <span className={open.unknown ? "" : open.open ? "good" : "bad"}>{open.label}</span>
         </div>
-        <p>Google 評分 {restaurant.rating || "尚無"}（{restaurant.reviewCount.toLocaleString()}） · {restaurant.cuisine}</p>
-        <p>{restaurant.walk ? `步行 ${restaurant.walk} 分 · ${restaurant.distance}m · ` : ""}{restaurantPriceText(restaurant)}</p>
+        <p>{ratingText(restaurant)} · {restaurant.cuisine}</p>
+        <p>{distanceText(restaurant)} · {restaurantPriceText(restaurant)}</p>
         {hint && <p className="matchHint">推薦依據：{hint}</p>}
         <small className="sourceMark">{restaurant.sourceLabel}</small>
       </button>

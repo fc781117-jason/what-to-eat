@@ -39,6 +39,7 @@ This repository currently includes:
 - Local persistence for profile, favorites, comparisons, and decision history
 - Migration from the earlier V0.1 theme/profile shape
 - Server-only Google Places (New) search adapter with an explicit enable flag and request rate limit
+- Exact Place ID lookup for full Google Maps URLs in restaurant comparison; search results require address confirmation before adding a branch
 - No runtime fallback to Demo restaurants; missing integrations are shown as unavailable
 - GitHub Actions build verification
 - Vercel-compatible dynamic API route
@@ -46,7 +47,7 @@ This repository currently includes:
 ## Integration gates
 
 Live integrations are intentionally separated from the UI so they can be connected without rewriting the experience:
-- Google Places / Maps: set `GOOGLE_PLACES_API_KEY`, then set `GOOGLE_PLACES_LIVE_ENABLED=true`. Keep `GOOGLE_PLACES_FIELD_TIER=pro` unless the opening-hours field tier has been approved.
+- Google Places / Maps: after explicit cost approval, set a server-only `GOOGLE_PLACES_API_KEY`, then set `GOOGLE_PLACES_LIVE_ENABLED=true`. The default `GOOGLE_PLACES_FIELD_TIER=pro` requests name, address, location, category and Maps URL. `enterprise` additionally requests rating, review count, price level and opening status; these fields change the billing SKU. No paid API is enabled in the repository.
 - Supabase Auth (Google / Apple / Email)
 - Supabase cloud sync
 

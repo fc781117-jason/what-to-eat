@@ -139,6 +139,27 @@ select:focus-visible {
   position: relative;
 }
 
+.compareMatchList {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.compareMatchList button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.compareMatchList small { color: var(--muted); }
+.compareMatchList button:disabled { opacity: .5; }
+
 .topbar {
   height: 62px;
   display: grid;

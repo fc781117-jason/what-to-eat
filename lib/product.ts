@@ -475,7 +475,7 @@ function minutesOf(text: string) {
   return hour * 60 + minute;
 }
 
-export function restaurantOpenState(restaurant: Restaurant, now = new Date()) {
+export function restaurantOpenState(restaurant: Restaurant, now = new Date()): { open: boolean; label: string; unknown?: boolean } {
   if (typeof restaurant.openNow === "boolean") {
     return { open: restaurant.openNow, label: restaurant.openNow ? "營業中" : "目前休息" };
   }

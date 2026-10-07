@@ -8,7 +8,7 @@ import { buildDecisionBehaviorStats, buildFoodStats } from '../lib/analytics.ts'
 import { parseGoogleMapsInput, dishesFor } from '../lib/functional-data.ts';
 import { DEMO_RESTAURANTS } from '../lib/product.ts';
 import { matchesRestaurantSearch } from '../lib/recommendation.ts';
-import { googlePlaceToRestaurant } from '../lib/google-places.ts';
+import { googlePlaceToRestaurant, placeDetailsFieldMask, placesFieldMask, placesWithinRadius } from '../lib/google-places.ts';
 
 test('active clock pauses in background and abandoned time does not affect successful average', () => {
   let first = createDecisionSession('roulette', 1000);
@@ -97,8 +97,24 @@ test('Google Places mapping preserves real fields without inventing menu data', 
   assert.equal(restaurant.sourceLabel, 'Google Places');
   assert.equal(restaurant.priceLevelLabel, '$$');
   assert.ok(restaurant.distance > 0);
+  assert.equal(restaurant.walk, 0);
   assert.deepEqual(restaurant.menuItems, []);
   assert.deepEqual(restaurant.signature, []);
+});
+
+test('Pro mask excludes Enterprise billing fields, and radius rejects text-search spillover', () => {
+  const pro = placesFieldMask(false);
+  for (const field of ['rating', 'userRatingCount', 'priceLevel', 'currentOpeningHours']) {
+    assert.equal(pro.includes(field), false);
+    assert.equal(placesFieldMask(true).includes(field), true);
+  }
+  assert.equal(placeDetailsFieldMask(false).includes('places.'), false);
+  const places = [
+    { id: 'near', location: { latitude: 25.0478, longitude: 121.517 } },
+    { id: 'far', location: { latitude: 25.10, longitude: 121.517 } },
+    { id: 'missing' },
+  ];
+  assert.deepEqual(placesWithinRadius(places, { lat: 25.047, lng: 121.517 }, 1000).map((place) => place.id), ['near']);
 });
 
 test('budget intent excludes live places when Google has no reliable numeric spend', () => {
