@@ -852,7 +852,9 @@ export default function V15Client() {
                   <Mascot id={profile.mascot} mood="celebrate" size={72} />
                 </div>
                 <div className="resultFacts">
+                  <div><span>料理類型</span><b>{rouletteWinner.cuisine}</b></div>
                   <div><span>推薦理由</span><b>{recommendationHint(rouletteWinner, profile)}</b></div>
+                  <div><span>營業狀態</span><b>{restaurantOpenState(rouletteWinner, new Date(clock)).label}</b></div>
                   <div><span>地址</span><b>{rouletteWinner.address}</b></div>
                 </div>
                 {dishesFor(rouletteWinner).length ? (
@@ -861,9 +863,10 @@ export default function V15Client() {
                     {rouletteDish && <div className="dishResult"><span>今天可以吃</span><strong>{rouletteDish.name}</strong><small>{rouletteDish.price ? `NT$ ${rouletteDish.price}` : "價格尚無可信來源"}</small></div>}
                   </div>
                 ) : (
-                  <div className="truthNotice"><b>餐點資料尚未取得</b><span>Google Places 不提供完整菜單；在接到餐廳官方菜單前，不會替你捏造推薦菜色。</span></div>
+                  <div className="truthNotice"><b>餐點資料尚未取得</b><span>Google Places 不提供完整菜單；可先查看店家的 Google Maps 資訊或菜單，再決定吃哪一道。不會替你捏造推薦菜色。</span></div>
                 )}
                 <div className="winnerActions">
+                  {rouletteWinner.googleMapsUrl && <a className="primaryMini" href={rouletteWinner.googleMapsUrl} target="_blank" rel="noreferrer">開啟 Google Maps</a>}
                   <button className="primaryMini" onClick={() => openDetail(rouletteWinner, "roulette")}>
                     看詳細資料
                   </button>

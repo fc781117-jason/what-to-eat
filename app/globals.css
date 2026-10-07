@@ -1926,6 +1926,7 @@ select:focus-visible {
   color:white;
   border-color:transparent;
 }
+.winnerActions a.primaryMini{display:grid;place-items:center;text-decoration:none;text-align:center}
 .dangerSoft{
   background:color-mix(in srgb,#cc5151 9%,var(--surface2))!important;
   color:#c65353!important;
