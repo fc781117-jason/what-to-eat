@@ -266,6 +266,7 @@ export default function V15Client() {
     .filter(Boolean) as Restaurant[];
   const rankedCompare = compareRestaurants.length >= 2 ? rankRestaurants(compareRestaurants, profile) : [];
   const compareWinner = rankedCompare.length >= 2 &&
+    scoreRestaurant(rankedCompare[0], profile).reasons.length > 0 &&
     scoreRestaurant(rankedCompare[0], profile).score > scoreRestaurant(rankedCompare[1], profile).score
       ? rankedCompare[0] : null;
 
@@ -457,7 +458,8 @@ export default function V15Client() {
 
   function changeRadius(radius: number) {
     setSearchRadius(radius);
-    if (location) void searchLiveRestaurants(location, "", true, radius);
+    const query = view === "category" ? [selectedCuisine === "全部" ? "" : selectedCuisine, search].filter(Boolean).join(" ") : "";
+    if (location) void searchLiveRestaurants(location, query, true, radius);
   }
 
   async function locate() {
@@ -661,7 +663,11 @@ export default function V15Client() {
               </div>
             </section>
 
-            <form className="homeSearch" onSubmit={(event) => { event.preventDefault(); beginDecision("category", categoryResults.length, "category"); }}>
+            <form className="homeSearch" onSubmit={(event) => {
+              event.preventDefault();
+              beginDecision("category", categoryResults.length, "category");
+              if (location || manualAreaConfirmed) void searchLiveRestaurants(location, [manualAreaConfirmed, search].filter(Boolean).join(" "));
+            }}>
               <LineIcon kind="search" />
               <input aria-label="搜尋餐廳、料理或地區" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜尋餐廳・料理・地區…" />
               <button type="submit">搜尋</button>
@@ -1196,6 +1202,8 @@ export default function V15Client() {
               )}
             </section>
             {!(savedTab === "favorites" ? favorites : foodDatabase[savedTab]).length && <Empty text="目前沒有這一類的餐廳；可在詳細頁標記。" />}
+            {(savedTab === "favorites" ? favorites : foodDatabase[savedTab]).some((id) => !knownRestaurants.some((restaurant) => restaurant.id === id)) &&
+              <p className="micro">已保留餐廳的 Google Place ID。重新搜尋該店後會顯示最新資訊；不使用過期的店名、評分或營業狀態。</p>}
             <section className="detailCard">
               <h2>我的清單</h2>
               <div className="compareInputRow">
