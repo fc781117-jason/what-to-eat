@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "test": "node tests/functional.test.mjs",
     "start": "next start",
     "lint": "next lint"
   },

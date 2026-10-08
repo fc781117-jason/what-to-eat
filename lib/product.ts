@@ -15,7 +15,23 @@ export type ViewId =
   | "detail"
   | "go";
 
-export type DataSourceKind = "demo" | "google" | "official" | "ai-estimate";
+export type DataSourceKind = "demo" | "google" | "official" | "booking" | "user" | "ai-summary" | "ai-estimate";
+
+export type Dish = {
+  dishId: string;
+  restaurantId: string;
+  name: string;
+  category: string;
+  price?: number;
+  photo?: string;
+  popularity?: number;
+  source: DataSourceKind;
+  sourceFreshness?: string;
+  likes: number;
+  dislikes: number;
+  selectionCount: number;
+  recommendationEvidence: string[];
+};
 
 export type MenuItem = {
   name: string;
@@ -54,6 +70,8 @@ export type Restaurant = {
   distance: number;
   priceMin: number;
   priceMax: number;
+  priceLevelLabel?: string;
+  openNow?: boolean | null;
   address: string;
   phone?: string;
   websiteUrl?: string;
@@ -80,6 +98,8 @@ export type HistoryEntry = {
   createdAt: string;
   decisionSeconds?: number;
   candidateCount?: number;
+  dishId?: string;
+  dishName?: string;
 };
 
 export type DecisionSession = {
@@ -455,7 +475,13 @@ function minutesOf(text: string) {
   return hour * 60 + minute;
 }
 
-export function restaurantOpenState(restaurant: Restaurant, now = new Date()) {
+export function restaurantOpenState(restaurant: Restaurant, now = new Date()): { open: boolean; label: string; unknown?: boolean } {
+  if (typeof restaurant.openNow === "boolean") {
+    return { open: restaurant.openNow, label: restaurant.openNow ? "營業中" : "目前休息" };
+  }
+  if (!Object.keys(restaurant.weeklyHours).length) {
+    return { open: true, label: "營業狀態請見 Google Maps", unknown: true };
+  }
   const day = now.getDay() as 0 | 1 | 2 | 3 | 4 | 5 | 6;
   const minute = now.getHours() * 60 + now.getMinutes();
   const intervals = restaurant.weeklyHours[day] ?? [];
@@ -484,7 +510,12 @@ export function restaurantOpenState(restaurant: Restaurant, now = new Date()) {
 }
 
 export function moneyText(min: number, max: number) {
+  if (!min && !max) return "價格請見 Google Maps";
   return `NT$ ${min}–${max}`;
+}
+
+export function restaurantPriceText(restaurant: Restaurant) {
+  return restaurant.priceLevelLabel || moneyText(restaurant.priceMin, restaurant.priceMax);
 }
 
 export function priceBandMax(id: PriceBand) {
