@@ -5,6 +5,10 @@ export const dynamic = "force-dynamic";
 
 const attempts = new Map<string, { count: number; resetAt: number }>();
 
+function placesJson(data: unknown, status = 200) {
+  return NextResponse.json(data, { status, headers: { "Cache-Control": "no-store" } });
+}
+
 function limited(request: NextRequest) {
   const key = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
   const now = Date.now();
@@ -25,16 +29,16 @@ function numberParam(value: string | null) {
 
 export async function GET(request: NextRequest) {
   if (limited(request)) {
-    return NextResponse.json({ code: "RATE_LIMITED", message: "搜尋次數過多，請稍後再試。" }, { status: 429 });
+    return placesJson({ code: "RATE_LIMITED", message: "搜尋次數過多，請稍後再試。" }, 429);
   }
 
   const enabled = process.env.GOOGLE_PLACES_LIVE_ENABLED === "true";
   const key = process.env.GOOGLE_PLACES_API_KEY;
   if (!enabled || !key) {
-    return NextResponse.json({
+    return placesJson({
       code: "PLACES_NOT_CONFIGURED",
       message: "真實 Google Places 尚未啟用。請先設定受限制的伺服器金鑰與用量上限。",
-    }, { status: 503 });
+    }, 503);
   }
 
   const lat = numberParam(request.nextUrl.searchParams.get("lat"));
@@ -45,10 +49,10 @@ export async function GET(request: NextRequest) {
 
   const hasCoordinates = lat !== null && lng !== null && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
   if ((request.nextUrl.searchParams.has("lat") || request.nextUrl.searchParams.has("lng")) && !hasCoordinates) {
-    return NextResponse.json({ code: "INVALID_LOCATION", message: "位置座標無效，請重新定位。" }, { status: 400 });
+    return placesJson({ code: "INVALID_LOCATION", message: "位置座標無效，請重新定位。" }, 400);
   }
   if (!hasCoordinates && !query) {
-    return NextResponse.json({ code: "LOCATION_REQUIRED", message: "請先取得有效位置，或輸入地區與搜尋內容。" }, { status: 400 });
+    return placesJson({ code: "LOCATION_REQUIRED", message: "請先取得有效位置，或輸入地區與搜尋內容。" }, 400);
   }
 
   const enterprise = process.env.GOOGLE_PLACES_FIELD_TIER === "enterprise";
@@ -88,9 +92,8 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
-      const detail = await response.text();
-      console.error("Google Places request failed", response.status, detail.slice(0, 500));
-      return NextResponse.json({ code: "PLACES_UPSTREAM_ERROR", message: "Google Places 暫時無法完成搜尋。" }, { status: 502 });
+      console.error("Google Places request failed", response.status);
+      return placesJson({ code: "PLACES_UPSTREAM_ERROR", message: "Google Places 暫時無法完成搜尋。" }, 502);
     }
 
     const data = await response.json() as { places?: GooglePlace[] };
@@ -101,9 +104,9 @@ export async function GET(request: NextRequest) {
     const restaurants = scopedPlaces
       .map((place) => googlePlaceToRestaurant(place, hasCoordinates ? { lat: lat!, lng: lng! } : undefined))
       .filter(Boolean);
-    return NextResponse.json({ restaurants, source: "google", retrievedAt: new Date().toISOString() });
+    return placesJson({ restaurants, source: "google", retrievedAt: new Date().toISOString() });
   } catch (error) {
     console.error("Google Places network error", error);
-    return NextResponse.json({ code: "PLACES_NETWORK_ERROR", message: "無法連線到 Google Places。" }, { status: 502 });
+    return placesJson({ code: "PLACES_NETWORK_ERROR", message: "無法連線到 Google Places。" }, 502);
   }
 }

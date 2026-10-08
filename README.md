@@ -52,6 +52,7 @@ Live integrations are intentionally separated from the UI so they can be connect
 - Supabase cloud sync
 
 See `docs/product-spec-v1.0.md` for the current product contract.
+See `docs/google-places-preview-activation.md` for the Preview-only Google Cloud and Vercel activation checklist.
 
 ## Cost policy
 

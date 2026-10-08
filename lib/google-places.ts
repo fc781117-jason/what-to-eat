@@ -81,7 +81,7 @@ export function googlePlaceToRestaurant(
     address: place.formattedAddress || "地址請見 Google Maps",
     googleMapsUrl: place.googleMapsUri,
     source: "google",
-    sourceLabel: "Google Places",
+    sourceLabel: "Google Maps",
     lastVerified: new Date().toISOString(),
     weeklyHours: {},
     signature: [],

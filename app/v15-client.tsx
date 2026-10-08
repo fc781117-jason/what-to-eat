@@ -848,7 +848,7 @@ export default function V15Client() {
                 <p className="eyebrow">STEP 2 · PICK A DISH</p>
                 <div className="winnerTop">
                   <div>
-                    <span className="sourceBadge">{rouletteWinner.sourceLabel}</span>
+                    <span className="sourceBadge" translate="no">{rouletteWinner.sourceLabel}</span>
                     <h2>{rouletteWinner.name}</h2>
                     <p>
                       {ratingText(rouletteWinner)} · {distanceText(rouletteWinner)} ·{" "}
@@ -1055,6 +1055,7 @@ export default function V15Client() {
                       <div className="compareRank">候選</div>
                       <h3>{restaurant.name}</h3>
                       <div className="compareFacts">
+                        <small className="sourceMark" translate="no">{restaurant.sourceLabel}</small>
                         <span>{ratingText(restaurant)}</span>
                         <span>{distanceText(restaurant)}</span>
                         <span>{restaurantPriceText(restaurant)}</span>
@@ -1400,7 +1401,7 @@ export default function V15Client() {
             <RestaurantGallery restaurant={selected} />
             <section className="detailIdentity">
               <div className="sourceLine">
-                <span className="sourceBadge">{selected.sourceLabel}</span>
+                <span className="sourceBadge" translate="no">{selected.sourceLabel}</span>
                 <span>{selected.lastVerified}</span>
               </div>
               <h1>{selected.name}</h1>
@@ -1949,7 +1950,7 @@ function RestaurantCard({
         <p>{ratingText(restaurant)} · {restaurant.cuisine}</p>
         <p>{distanceText(restaurant)} · {restaurantPriceText(restaurant)}</p>
         {hint && <p className="matchHint">推薦依據：{hint}</p>}
-        <small className="sourceMark">{restaurant.sourceLabel}</small>
+        <small className="sourceMark" translate="no">{restaurant.sourceLabel}</small>
       </button>
       <div className="cardActions">
         <button className={favorite ? "selected" : ""} onClick={onFavorite} aria-label={favorite ? "取消收藏" : "收藏"}><LineIcon kind="heart" /></button>

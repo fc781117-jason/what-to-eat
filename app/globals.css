@@ -1904,7 +1904,7 @@ select:focus-visible {
   border-radius:999px;
   background:color-mix(in srgb,var(--primary2) 16%,var(--surface2));
   color:var(--primary);
-  font-size:10px;
+  font-size:12px;
   font-weight:900;
 }
 .winnerActions{
@@ -2381,7 +2381,7 @@ select:focus-visible {
 .sourceMark{
   display:inline-flex;margin-top:4px;padding:3px 7px;border-radius:999px;
   background:color-mix(in srgb,var(--accent) 12%,var(--surface2));
-  color:var(--muted);font-size:9px;letter-spacing:.03em;
+  color:var(--muted);font-size:12px;letter-spacing:.03em;
 }
 .secondaryBtn:disabled,.compareInputRow button:disabled,.searchActionRow button:disabled{opacity:.48;cursor:not-allowed}
 .rouletteHero .discoveryLocation{max-width:100%}

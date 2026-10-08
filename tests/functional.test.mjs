@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import {
   createDecisionSession, recordDecisionEvent, pauseDecisionSession,
   resumeDecisionSession, completeDecisionSession, abandonDecisionSession, hasDecisionTimedOut,
@@ -94,7 +96,7 @@ test('Google Places mapping preserves real fields without inventing menu data', 
   }, { lat: 25.047, lng: 121.517 });
   assert.ok(restaurant);
   assert.equal(restaurant.source, 'google');
-  assert.equal(restaurant.sourceLabel, 'Google Places');
+  assert.equal(restaurant.sourceLabel, 'Google Maps');
   assert.equal(restaurant.priceLevelLabel, '$$');
   assert.ok(restaurant.distance > 0);
   assert.equal(restaurant.walk, 0);
@@ -121,4 +123,24 @@ test('budget intent excludes live places when Google has no reliable numeric spe
   const restaurant = googlePlaceToRestaurant({ id: 'x', displayName: { text: '未知價位店' } });
   assert.ok(restaurant);
   assert.equal(matchesRestaurantSearch(restaurant, '每人 300 元內'), false);
+});
+
+test('offline worker never intercepts Places API or third-party requests', () => {
+  const listeners = {};
+  const worker = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
+  runInNewContext(worker, {
+    URL,
+    self: {
+      registration: { scope: 'https://example.test/' },
+      location: { origin: 'https://example.test' },
+      addEventListener(name, listener) { listeners[name] = listener; },
+    },
+  });
+  for (const url of [
+    'https://example.test/api/places/search?lat=25.04&lng=121.51',
+    'https://example.test/api/places/details?id=ChIJ12345678',
+    'https://places.googleapis.com/v1/places:searchNearby',
+  ]) {
+    listeners.fetch({ request: { method: 'GET', url, destination: '' }, respondWith() { assert.fail('private API response was intercepted'); } });
+  }
 });
